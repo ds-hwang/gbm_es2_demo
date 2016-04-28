@@ -10,6 +10,7 @@
 
 /*
  * (c) 2009 Aaftab Munshi, Dan Ginsburg, Dave Shreiner
+ * (c) 2016 Dongseong Hwang
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -43,7 +44,9 @@
 //  Includes
 //
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 
 #ifdef __cplusplus
 
