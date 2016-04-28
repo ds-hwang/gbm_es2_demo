@@ -25,6 +25,7 @@
 
 /* Based on a egl cube test app originally written by Arvin Schnell */
 
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -802,7 +803,11 @@ int main(int argc, char *argv[]) {
   }
 
   gbm.front_buffer ^= 1;
-
+  int got_user_input = 0;
+  struct timeval lasttime;
+  gettimeofday(&lasttime, NULL);
+  int num_frames = 0;
+  const int one_sec = 1000000;
   while (1) {
     int waiting_for_flip = 1;
 
@@ -824,7 +829,6 @@ int main(int argc, char *argv[]) {
       return -1;
     }
 
-    int got_user_input = 0;
     while (waiting_for_flip) {
       ret = select(drm.fd + 1, &fds, NULL, NULL, NULL);
       if (ret < 0) {
@@ -847,6 +851,16 @@ int main(int argc, char *argv[]) {
     }
 
     gbm.front_buffer ^= 1;
+    num_frames++;
+    struct timeval currenttime;
+    gettimeofday(&currenttime, NULL);
+    long elapsed = (currenttime.tv_sec - lasttime.tv_sec) * one_sec +
+                   currenttime.tv_usec - lasttime.tv_usec;
+    if (elapsed > one_sec) {
+      printf("FPS: %4f \n", num_frames / ((double)elapsed / one_sec));
+      num_frames = 0;
+      lasttime = currenttime;
+    }
   }
 
   for (size_t i = 0; i < NUM_BUFFERS; i++) {
