@@ -1,5 +1,6 @@
 #
 #  Copyright (c) 2012 Rob Clark <rob@ti.com>
+#  Copyright (c) 2016 Dongseong Hwang <dongseong.hwang@intel.com>
 #
 #  Permission is hereby granted, free of charge, to any person obtaining a
 #  copy of this software and associated documentation files (the "Software"),
@@ -21,24 +22,24 @@
 #  SOFTWARE.
 #
 
-bin_PROGRAMS = kmscube
+bin_PROGRAMS = gbm_es2_demo
 
-kmscube_LDFLAGS = \
+gbm_es2_demo_LDFLAGS = \
 	-no-undefined
 
-kmscube_LDADD = \
+gbm_es2_demo_LDADD = \
 	$(DRM_LIBS) \
 	$(GBM_LIBS) \
 	$(EGL_LIBS) \
 	$(GLES2_LIBS)
 
-kmscube_CFLAGS = \
+gbm_es2_demo_CPPFLAGS = \
 	-O0 -g -lm \
 	$(DRM_CFLAGS) \
 	$(GBM_CFLAGS) \
 	$(EGL_CFLAGS) \
 	$(GLES2_CFLAGS)
 
-kmscube_SOURCES = \
-	kmscube.c \
-	esTransform.c
+gbm_es2_demo_SOURCES = \
+	gbm_es2_demo.cpp \
+	esTransform.cpp

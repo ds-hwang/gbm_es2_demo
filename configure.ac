@@ -1,5 +1,6 @@
 #
 #  Copyright (c) 2012 Rob Clark <rob@ti.com>
+#  Copyright (c) 2016 Dongseong Hwang <dongseong.hwang@intel.com>
 #
 #  Permission is hereby granted, free of charge, to any person obtaining a
 #  copy of this software and associated documentation files (the "Software"),
@@ -28,6 +29,8 @@ AC_CONFIG_SRCDIR([Makefile.am])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([m4])
+AC_PROG_CXX
+AC_PROG_CC
 
 # Initialize Automake
 AM_INIT_AUTOMAKE([foreign dist-bzip2])

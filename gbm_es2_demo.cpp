@@ -32,6 +32,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <errno.h>
 
 #include <xf86drm.h>
@@ -531,7 +532,7 @@ static int init_gl(void) {
     printf("vertex shader compilation failed!:\n");
     glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &ret);
     if (ret > 1) {
-      log = malloc(ret);
+      log = static_cast<char*>(malloc(ret));
       glGetShaderInfoLog(vertex_shader, ret, NULL, log);
       printf("%s", log);
     }
@@ -552,7 +553,7 @@ static int init_gl(void) {
     glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &ret);
 
     if (ret > 1) {
-      log = malloc(ret);
+      log = static_cast<char*>(malloc(ret));
       glGetShaderInfoLog(fragment_shader, ret, NULL, log);
       printf("%s", log);
     }
@@ -579,7 +580,7 @@ static int init_gl(void) {
     glGetProgramiv(gl.program, GL_INFO_LOG_LENGTH, &ret);
 
     if (ret > 1) {
-      log = malloc(ret);
+      log = static_cast<char*>(malloc(ret));
       glGetProgramInfoLog(gl.program, ret, NULL, log);
       printf("%s", log);
     }
@@ -707,7 +708,7 @@ static void egl_sync_fence() {
 }
 
 static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data) {
-  struct drm_fb *fb = data;
+  struct drm_fb *fb = static_cast<struct drm_fb*>(data);
   struct gbm_device *gbm = gbm_bo_get_device(bo);
 
   if (fb->fb_id)
@@ -717,14 +718,14 @@ static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data) {
 }
 
 static struct drm_fb *drm_fb_get_from_bo(struct gbm_bo *bo) {
-  struct drm_fb *fb = gbm_bo_get_user_data(bo);
+  struct drm_fb *fb = static_cast<struct drm_fb*>(gbm_bo_get_user_data(bo));
   uint32_t width, height, stride, handle;
   int ret;
 
   if (fb)
     return fb;
 
-  fb = calloc(1, sizeof *fb);
+  fb = static_cast<struct drm_fb*>(calloc(1, sizeof *fb));
   fb->bo = bo;
 
   width = gbm_bo_get_width(bo);
@@ -746,17 +747,16 @@ static struct drm_fb *drm_fb_get_from_bo(struct gbm_bo *bo) {
 
 static void page_flip_handler(int fd, unsigned int frame, unsigned int sec,
                               unsigned int usec, void *data) {
-  int *waiting_for_flip = data;
+  int *waiting_for_flip = static_cast<int*>(data);
   *waiting_for_flip = 0;
 }
 
 int main(int argc, char *argv[]) {
   const char *card;
   fd_set fds;
-  drmEventContext evctx = {
-      .version = DRM_EVENT_CONTEXT_VERSION,
-      .page_flip_handler = page_flip_handler,
-  };
+  drmEventContext evctx;
+  evctx.version = DRM_EVENT_CONTEXT_VERSION;
+  evctx.page_flip_handler = page_flip_handler;
   struct gbm_bo *bo;
   struct drm_fb *fb;
   uint32_t i = 0;
