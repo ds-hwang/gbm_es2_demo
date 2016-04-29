@@ -53,6 +53,9 @@ static struct {
   PFNEGLCREATEIMAGEKHRPROC CreateImageKHR;
   PFNEGLDESTROYIMAGEKHRPROC DestroyImageKHR;
   PFNGLEGLIMAGETARGETTEXTURE2DOESPROC EGLImageTargetTexture2DOES;
+  PFNEGLCREATESYNCKHRPROC CreateSyncKHR;
+  PFNEGLCLIENTWAITSYNCKHRPROC ClientWaitSyncKHR;
+  int egl_sync_supported;
 } egl;
 
 static struct {
@@ -247,11 +250,20 @@ static int init_egl(void) {
   egl.EGLImageTargetTexture2DOES =
       (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress(
           "glEGLImageTargetTexture2DOES");
+  egl.CreateSyncKHR =
+      (PFNEGLCREATESYNCKHRPROC)eglGetProcAddress("eglCreateSyncKHR");
+  egl.ClientWaitSyncKHR =
+      (PFNEGLCLIENTWAITSYNCKHRPROC)eglGetProcAddress("eglClientWaitSyncKHR");
   if (!egl.CreateImageKHR || !egl.DestroyImageKHR ||
       !egl.EGLImageTargetTexture2DOES) {
     printf("eglGetProcAddress returned NULL for a required extension entry "
            "point.\n");
     return -1;
+  }
+  if (egl.CreateSyncKHR && egl.ClientWaitSyncKHR) {
+    egl.egl_sync_supported = 1;
+  } else {
+    egl.egl_sync_supported = 0;
   }
 
   static const EGLint context_attribs[] = {EGL_CONTEXT_CLIENT_VERSION, 2,
@@ -684,6 +696,16 @@ static void draw(uint32_t i) {
   glDrawArrays(GL_TRIANGLE_STRIP, 20, 4);
 }
 
+static void egl_sync_fence() {
+  if (egl.egl_sync_supported) {
+    EGLSyncKHR sync = egl.CreateSyncKHR(egl.display, EGL_SYNC_FENCE_KHR, NULL);
+    glFlush();
+    egl.ClientWaitSyncKHR(egl.display, sync, 0, EGL_FOREVER_KHR);
+  } else {
+    glFinish();
+  }
+}
+
 static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data) {
   struct drm_fb *fb = data;
   struct gbm_device *gbm = gbm_bo_get_device(bo);
@@ -789,7 +811,7 @@ int main(int argc, char *argv[]) {
   /* clear the color buffer */
   glClearColor(0.5, 0.5, 0.5, 1.0);
   glClear(GL_COLOR_BUFFER_BIT);
-  glFinish();
+  egl_sync_fence();
 
   gbm.front_buffer = 0;
   const struct framebuffer *back_fb = &fbs[gbm.front_buffer ^ 1];
@@ -814,8 +836,7 @@ int main(int argc, char *argv[]) {
     const struct framebuffer *back_fb = &fbs[gbm.front_buffer ^ 1];
     glBindFramebuffer(GL_FRAMEBUFFER, back_fb->gl_fb);
     draw(i++);
-    // FIXME: use EGLFence instead of glFinish
-    glFinish();
+    egl_sync_fence();
 
     /*
      * Here you could also update drm plane layers if you want
