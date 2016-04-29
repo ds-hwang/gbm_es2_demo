@@ -25,876 +25,382 @@
 
 /* Based on a egl cube test app originally written by Arvin Schnell */
 
-#include <sys/time.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
+#include <GLES2/gl2.h>
 
-#include <xf86drm.h>
-#include <xf86drmMode.h>
-#include <gbm.h>
+#include <cmath>
+#include <memory>
+#include <string>
 
-#include "esUtil.h"
+#include "drm_modesetter.h"
+#include "egl_drm_glue.h"
+#include "matrix.h"
 
-#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
-// double buffering
-#define NUM_BUFFERS 2
+namespace demo {
 
-static struct {
-  EGLDisplay display;
-  EGLConfig config;
-  EGLContext context;
-
-  // Names are the original gl/egl function names with the prefix chopped off.
-  PFNEGLCREATEIMAGEKHRPROC CreateImageKHR;
-  PFNEGLDESTROYIMAGEKHRPROC DestroyImageKHR;
-  PFNGLEGLIMAGETARGETTEXTURE2DOESPROC EGLImageTargetTexture2DOES;
-  PFNEGLCREATESYNCKHRPROC CreateSyncKHR;
-  PFNEGLCLIENTWAITSYNCKHRPROC ClientWaitSyncKHR;
-  int egl_sync_supported;
-} egl;
-
-static struct {
-  GLuint program;
-  GLint modelviewmatrix, modelviewprojectionmatrix, normalmatrix;
-  GLuint vbo;
-  GLuint positionsoffset, colorsoffset, normalsoffset;
-} gl;
-
-static struct {
-  struct gbm_device *dev;
-  uint32_t front_buffer;
-} gbm;
-
-struct framebuffer {
-  struct gbm_bo *bo;
-  int fd;
-  uint32_t fb_id;
-  EGLImageKHR image;
-  GLuint gl_tex;
-  GLuint gl_fb;
-};
-static struct framebuffer fbs[NUM_BUFFERS];
-
-static struct {
-  int fd;
-  drmModeModeInfo *mode;
-  uint32_t crtc_id;
-  uint32_t connector_id;
-} drm;
-
-struct drm_fb {
-  struct gbm_bo *bo;
-  uint32_t fb_id;
-};
-
-static const char *get_egl_error() {
-  switch (eglGetError()) {
-  case EGL_SUCCESS:
-    return "EGL_SUCCESS";
-  case EGL_NOT_INITIALIZED:
-    return "EGL_NOT_INITIALIZED";
-  case EGL_BAD_ACCESS:
-    return "EGL_BAD_ACCESS";
-  case EGL_BAD_ALLOC:
-    return "EGL_BAD_ALLOC";
-  case EGL_BAD_ATTRIBUTE:
-    return "EGL_BAD_ATTRIBUTE";
-  case EGL_BAD_CONTEXT:
-    return "EGL_BAD_CONTEXT";
-  case EGL_BAD_CONFIG:
-    return "EGL_BAD_CONFIG";
-  case EGL_BAD_CURRENT_SURFACE:
-    return "EGL_BAD_CURRENT_SURFACE";
-  case EGL_BAD_DISPLAY:
-    return "EGL_BAD_DISPLAY";
-  case EGL_BAD_SURFACE:
-    return "EGL_BAD_SURFACE";
-  case EGL_BAD_MATCH:
-    return "EGL_BAD_MATCH";
-  case EGL_BAD_PARAMETER:
-    return "EGL_BAD_PARAMETER";
-  case EGL_BAD_NATIVE_PIXMAP:
-    return "EGL_BAD_NATIVE_PIXMAP";
-  case EGL_BAD_NATIVE_WINDOW:
-    return "EGL_BAD_NATIVE_WINDOW";
-  case EGL_CONTEXT_LOST:
-    return "EGL_CONTEXT_LOST";
-  default:
-    return "EGL_???";
+class ES2Cube {
+ public:
+  ES2Cube() {}
+  ~ES2Cube() {
+    glDeleteBuffers(1, &vbo_);
+    glDeleteProgram(program_);
   }
-}
+  ES2Cube(const ES2Cube&) = delete;
+  void operator=(const ES2Cube&) = delete;
 
-static const char *get_gl_framebuffer_error() {
-  switch (glCheckFramebufferStatus(GL_FRAMEBUFFER)) {
-  case GL_FRAMEBUFFER_COMPLETE:
-    return "GL_FRAMEBUFFER_COMPLETE";
-  case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
-    return "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT";
-  case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
-    return "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT";
-  case GL_FRAMEBUFFER_UNSUPPORTED:
-    return "GL_FRAMEBUFFER_UNSUPPORTED";
-  case GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS:
-    return "GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS";
-  default:
-    return "GL_FRAMEBUFFER_???";
-  }
-}
-
-static int has_extension(const char *extension, const char *extensions) {
-  const char *start, *where, *terminator;
-  start = extensions;
-  for (;;) {
-    where = (char *)strstr((const char *)start, extension);
-    if (!where)
-      break;
-    terminator = where + strlen(extension);
-    if (where == start || *(where - 1) == ' ')
-      if (*terminator == ' ' || *terminator == '\0')
-        return 0;
-    start = terminator;
-  }
-  return -1;
-}
-
-static int init_drm(const char *node) {
-  drmModeRes *resources;
-  drmModeConnector *connector = NULL;
-  drmModeEncoder *encoder = NULL;
-  int i, area;
-
-  drm.fd = open(node, O_RDWR | O_CLOEXEC);
-  if (drm.fd < 0) {
-    printf("could not open drm device\n");
-    return -1;
-  }
-
-  resources = drmModeGetResources(drm.fd);
-  if (!resources) {
-    printf("drmModeGetResources failed: %s\n", strerror(errno));
-    return -1;
-  }
-
-  /* find a connected connector: */
-  for (i = 0; i < resources->count_connectors; i++) {
-    connector = drmModeGetConnector(drm.fd, resources->connectors[i]);
-    if (connector->connection == DRM_MODE_CONNECTED) {
-      /* it's connected, let's use this! */
-      break;
-    }
-    drmModeFreeConnector(connector);
-    connector = NULL;
-  }
-
-  if (!connector) {
-    /* we could be fancy and listen for hotplug events and wait for
-     * a connector..
-     */
-    printf("no connected connector!\n");
-    return -1;
-  }
-
-  /* find highest resolution mode: */
-  for (i = 0, area = 0; i < connector->count_modes; i++) {
-    drmModeModeInfo *current_mode = &connector->modes[i];
-    int current_area = current_mode->hdisplay * current_mode->vdisplay;
-    if (current_area > area) {
-      drm.mode = current_mode;
-      area = current_area;
-    }
-  }
-
-  if (!drm.mode) {
-    printf("could not find mode!\n");
-    return -1;
-  }
-
-  /* find encoder: */
-  for (i = 0; i < resources->count_encoders; i++) {
-    encoder = drmModeGetEncoder(drm.fd, resources->encoders[i]);
-    if (encoder->encoder_id == connector->encoder_id)
-      break;
-    drmModeFreeEncoder(encoder);
-    encoder = NULL;
-  }
-
-  if (!encoder) {
-    printf("no encoder!\n");
-    return -1;
-  }
-
-  drm.crtc_id = encoder->crtc_id;
-  drm.connector_id = connector->connector_id;
-
-  return 0;
-}
-
-static int init_gbm(void) {
-  gbm.dev = gbm_create_device(drm.fd);
-  return 0;
-}
-
-static int init_egl(void) {
-  EGLint major, minor, n;
-  GLint ret;
-
-  egl.CreateImageKHR =
-      (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
-  egl.DestroyImageKHR =
-      (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
-  egl.EGLImageTargetTexture2DOES =
-      (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress(
-          "glEGLImageTargetTexture2DOES");
-  egl.CreateSyncKHR =
-      (PFNEGLCREATESYNCKHRPROC)eglGetProcAddress("eglCreateSyncKHR");
-  egl.ClientWaitSyncKHR =
-      (PFNEGLCLIENTWAITSYNCKHRPROC)eglGetProcAddress("eglClientWaitSyncKHR");
-  if (!egl.CreateImageKHR || !egl.DestroyImageKHR ||
-      !egl.EGLImageTargetTexture2DOES) {
-    printf("eglGetProcAddress returned NULL for a required extension entry "
-           "point.\n");
-    return -1;
-  }
-  if (egl.CreateSyncKHR && egl.ClientWaitSyncKHR) {
-    egl.egl_sync_supported = 1;
-  } else {
-    egl.egl_sync_supported = 0;
-  }
-
-  static const EGLint context_attribs[] = {EGL_CONTEXT_CLIENT_VERSION, 2,
-                                           EGL_NONE};
-
-  static const EGLint config_attribs[] = {EGL_SURFACE_TYPE, EGL_DONT_CARE,
-                                          EGL_NONE};
-
-  egl.display = eglGetDisplay(gbm.dev);
-
-  if (!eglInitialize(egl.display, &major, &minor)) {
-    printf("failed to initialize\n");
-    return -1;
-  }
-
-  printf("Using display %p with EGL version %d.%d\n", egl.display, major,
-         minor);
-
-  printf("EGL Version \"%s\"\n", eglQueryString(egl.display, EGL_VERSION));
-  printf("EGL Vendor \"%s\"\n", eglQueryString(egl.display, EGL_VENDOR));
-
-  if (!eglBindAPI(EGL_OPENGL_ES_API)) {
-    printf("failed to bind api EGL_OPENGL_ES_API\n");
-    return -1;
-  }
-
-  if (!eglChooseConfig(egl.display, config_attribs, &egl.config, 1, &n) ||
-      n != 1) {
-    printf("failed to choose config: %d\n", n);
-    return -1;
-  }
-
-  egl.context = eglCreateContext(egl.display, egl.config, EGL_NO_CONTEXT,
-                                 context_attribs);
-  if (egl.context == NULL) {
-    printf("failed to create context\n");
-    return -1;
-  }
-  /* connect the context to the surface */
-  if (!eglMakeCurrent(egl.display, EGL_NO_SURFACE /* no default draw surface */,
-                      EGL_NO_SURFACE /* no default draw read */, egl.context)) {
-    printf("failed to make the OpenGL ES Context current: %s\n",
-           get_egl_error());
-    return -1;
-  }
-
-  const char *egl_extensions = eglQueryString(egl.display, EGL_EXTENSIONS);
-  printf("EGL Extensions \"%s\"\n", egl_extensions);
-  if (has_extension("EGL_KHR_image_base", egl_extensions)) {
-    printf("EGL_KHR_image_base extension not supported\n");
-    return -1;
-  }
-  if (has_extension("EGL_EXT_image_dma_buf_import", egl_extensions)) {
-    printf("EGL_EXT_image_dma_buf_import extension not supported\n");
-    return -1;
-  }
-
-  const char *gl_extensions = (const char *)glGetString(GL_EXTENSIONS);
-  if (has_extension("GL_OES_EGL_image", gl_extensions)) {
-    printf("GL_OES_EGL_image extension not supported\n");
-    return -1;
-  }
-
-  return 0;
-}
-
-static int create_framebuffers(void) {
-  uint32_t width = drm.mode->hdisplay;
-  uint32_t height = drm.mode->vdisplay;
-  for (size_t i = 0; i < NUM_BUFFERS; i++) {
-    fbs[i].bo = gbm_bo_create(gbm.dev, width, height, GBM_FORMAT_XRGB8888,
-                              GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-    if (!fbs[i].bo) {
-      printf("failed to create a gbm buffer.\n");
-      return -1;
+  bool Initialize(const std::string& card) {
+    std::unique_ptr<ged::DRMModesetter> drm = ged::DRMModesetter::Create(card);
+    if (!drm) {
+      fprintf(stderr, "failed to create DRMModesetter.\n");
+      return false;
     }
 
-    fbs[i].fd = gbm_bo_get_fd(fbs[i].bo);
-    if (fbs[i].fd < 0) {
-      printf("failed to get fb for bo: %d", fbs[i].fd);
-      return -1;
+    egl_ = ged::EGLDRMGlue::Create(
+        std::move(drm),
+        std::bind(&ES2Cube::DidSwapBuffer, this, std::placeholders::_1,
+                  std::placeholders::_2));
+    if (!egl_) {
+      fprintf(stderr, "failed to create EGLDRMGlue.\n");
+      return false;
     }
 
-    uint32_t handle = gbm_bo_get_handle(fbs[i].bo).u32;
-    uint32_t stride = gbm_bo_get_stride(fbs[i].bo);
-    uint32_t offset = 0;
-    drmModeAddFB2(drm.fd, width, height, GBM_FORMAT_XRGB8888, &handle, &stride,
-                  &offset, &fbs[i].fb_id, 0);
-    if (!fbs[i].fb_id) {
-      printf("failed to create framebuffer from buffer object.\n");
-      return -1;
-    }
+    display_size_ = egl_->GetDisplaySize();
 
-    const EGLint khr_image_attrs[] = {EGL_DMA_BUF_PLANE0_FD_EXT,
-                                      fbs[i].fd,
-                                      EGL_WIDTH,
-                                      width,
-                                      EGL_HEIGHT,
-                                      height,
-                                      EGL_LINUX_DRM_FOURCC_EXT,
-                                      GBM_FORMAT_XRGB8888,
-                                      EGL_DMA_BUF_PLANE0_PITCH_EXT,
-                                      stride,
-                                      EGL_DMA_BUF_PLANE0_OFFSET_EXT,
-                                      offset,
-                                      EGL_NONE};
-
-    fbs[i].image =
-        egl.CreateImageKHR(egl.display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
-                           NULL /* no client buffer */, khr_image_attrs);
-    if (fbs[i].image == EGL_NO_IMAGE_KHR) {
-      printf("failed to make image from buffer object: %s\n", get_egl_error());
-      return -1;
-    }
-  }
-  return 0;
-}
-
-static int init_gl(void) {
-  GLuint vertex_shader, fragment_shader;
-  GLint ret;
-
-  static const GLfloat vVertices[] = {
-      // front
-      -1.0f, -1.0f, +1.0f, // point blue
-      +1.0f, -1.0f, +1.0f, // point magenta
-      -1.0f, +1.0f, +1.0f, // point cyan
-      +1.0f, +1.0f, +1.0f, // point white
-      // back
-      +1.0f, -1.0f, -1.0f, // point red
-      -1.0f, -1.0f, -1.0f, // point black
-      +1.0f, +1.0f, -1.0f, // point yellow
-      -1.0f, +1.0f, -1.0f, // point green
-      // right
-      +1.0f, -1.0f, +1.0f, // point magenta
-      +1.0f, -1.0f, -1.0f, // point red
-      +1.0f, +1.0f, +1.0f, // point white
-      +1.0f, +1.0f, -1.0f, // point yellow
-      // left
-      -1.0f, -1.0f, -1.0f, // point black
-      -1.0f, -1.0f, +1.0f, // point blue
-      -1.0f, +1.0f, -1.0f, // point green
-      -1.0f, +1.0f, +1.0f, // point cyan
-      // top
-      -1.0f, +1.0f, +1.0f, // point cyan
-      +1.0f, +1.0f, +1.0f, // point white
-      -1.0f, +1.0f, -1.0f, // point green
-      +1.0f, +1.0f, -1.0f, // point yellow
-      // bottom
-      -1.0f, -1.0f, -1.0f, // point black
-      +1.0f, -1.0f, -1.0f, // point red
-      -1.0f, -1.0f, +1.0f, // point blue
-      +1.0f, -1.0f, +1.0f  // point magenta
-  };
-
-  static const GLfloat vColors[] = {
-      // front
-      0.0f, 0.0f, 1.0f, // blue
-      1.0f, 0.0f, 1.0f, // magenta
-      0.0f, 1.0f, 1.0f, // cyan
-      1.0f, 1.0f, 1.0f, // white
-      // back
-      1.0f, 0.0f, 0.0f, // red
-      0.0f, 0.0f, 0.0f, // black
-      1.0f, 1.0f, 0.0f, // yellow
-      0.0f, 1.0f, 0.0f, // green
-      // right
-      1.0f, 0.0f, 1.0f, // magenta
-      1.0f, 0.0f, 0.0f, // red
-      1.0f, 1.0f, 1.0f, // white
-      1.0f, 1.0f, 0.0f, // yellow
-      // left
-      0.0f, 0.0f, 0.0f, // black
-      0.0f, 0.0f, 1.0f, // blue
-      0.0f, 1.0f, 0.0f, // green
-      0.0f, 1.0f, 1.0f, // cyan
-      // top
-      0.0f, 1.0f, 1.0f, // cyan
-      1.0f, 1.0f, 1.0f, // white
-      0.0f, 1.0f, 0.0f, // green
-      1.0f, 1.0f, 0.0f, // yellow
-      // bottom
-      0.0f, 0.0f, 0.0f, // black
-      1.0f, 0.0f, 0.0f, // red
-      0.0f, 0.0f, 1.0f, // blue
-      1.0f, 0.0f, 1.0f  // magenta
-  };
-
-  static const GLfloat vNormals[] = {
-      // front
-      +0.0f, +0.0f, +1.0f, // forward
-      +0.0f, +0.0f, +1.0f, // forward
-      +0.0f, +0.0f, +1.0f, // forward
-      +0.0f, +0.0f, +1.0f, // forward
-      // back
-      +0.0f, +0.0f, -1.0f, // backbard
-      +0.0f, +0.0f, -1.0f, // backbard
-      +0.0f, +0.0f, -1.0f, // backbard
-      +0.0f, +0.0f, -1.0f, // backbard
-      // right
-      +1.0f, +0.0f, +0.0f, // right
-      +1.0f, +0.0f, +0.0f, // right
-      +1.0f, +0.0f, +0.0f, // right
-      +1.0f, +0.0f, +0.0f, // right
-      // left
-      -1.0f, +0.0f, +0.0f, // left
-      -1.0f, +0.0f, +0.0f, // left
-      -1.0f, +0.0f, +0.0f, // left
-      -1.0f, +0.0f, +0.0f, // left
-      // top
-      +0.0f, +1.0f, +0.0f, // up
-      +0.0f, +1.0f, +0.0f, // up
-      +0.0f, +1.0f, +0.0f, // up
-      +0.0f, +1.0f, +0.0f, // up
-      // bottom
-      +0.0f, -1.0f, +0.0f, // down
-      +0.0f, -1.0f, +0.0f, // down
-      +0.0f, -1.0f, +0.0f, // down
-      +0.0f, -1.0f, +0.0f  // down
-  };
-
-  static const char *vertex_shader_source =
-      "uniform mat4 modelviewMatrix;      \n"
-      "uniform mat4 modelviewprojectionMatrix;\n"
-      "uniform mat3 normalMatrix;         \n"
-      "                                   \n"
-      "attribute vec4 in_position;        \n"
-      "attribute vec3 in_normal;          \n"
-      "attribute vec4 in_color;           \n"
-      "\n"
-      "vec4 lightSource = vec4(2.0, 2.0, 20.0, 0.0);\n"
-      "                                   \n"
-      "varying vec4 vVaryingColor;        \n"
-      "                                   \n"
-      "void main()                        \n"
-      "{                                  \n"
-      "    gl_Position = modelviewprojectionMatrix * in_position;\n"
-      "    vec3 vEyeNormal = normalMatrix * in_normal;\n"
-      "    vec4 vPosition4 = modelviewMatrix * in_position;\n"
-      "    vec3 vPosition3 = vPosition4.xyz / vPosition4.w;\n"
-      "    vec3 vLightDir = normalize(lightSource.xyz - vPosition3);\n"
-      "    float diff = max(0.0, dot(vEyeNormal, vLightDir));\n"
-      "    vVaryingColor = vec4(diff * in_color.rgb, 1.0);\n"
-      "}                                  \n";
-
-  static const char *fragment_shader_source =
-      "precision mediump float;           \n"
-      "                                   \n"
-      "varying vec4 vVaryingColor;        \n"
-      "                                   \n"
-      "void main()                        \n"
-      "{                                  \n"
-      "    gl_FragColor = vVaryingColor;  \n"
-      "}                                  \n";
-
-  vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-
-  glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
-  glCompileShader(vertex_shader);
-
-  glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &ret);
-  if (!ret) {
-    char *log;
-
-    printf("vertex shader compilation failed!:\n");
-    glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &ret);
-    if (ret > 1) {
-      log = static_cast<char*>(malloc(ret));
-      glGetShaderInfoLog(vertex_shader, ret, NULL, log);
-      printf("%s", log);
-    }
-
-    return -1;
+    // Need to do the first mode setting before page flip.
+    if (!InitializeGL())
+      return false;
+    return true;
   }
 
-  fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+  bool Run() { return egl_->Run(); }
 
-  glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
-  glCompileShader(fragment_shader);
+ private:
+  bool InitializeGL() {
+    static const GLfloat vVertices[] = {
+        // front
+        -1.0f, -1.0f, +1.0f,  // point blue
+        +1.0f, -1.0f, +1.0f,  // point magenta
+        -1.0f, +1.0f, +1.0f,  // point cyan
+        +1.0f, +1.0f, +1.0f,  // point white
+        // back
+        +1.0f, -1.0f, -1.0f,  // point red
+        -1.0f, -1.0f, -1.0f,  // point black
+        +1.0f, +1.0f, -1.0f,  // point yellow
+        -1.0f, +1.0f, -1.0f,  // point green
+        // right
+        +1.0f, -1.0f, +1.0f,  // point magenta
+        +1.0f, -1.0f, -1.0f,  // point red
+        +1.0f, +1.0f, +1.0f,  // point white
+        +1.0f, +1.0f, -1.0f,  // point yellow
+        // left
+        -1.0f, -1.0f, -1.0f,  // point black
+        -1.0f, -1.0f, +1.0f,  // point blue
+        -1.0f, +1.0f, -1.0f,  // point green
+        -1.0f, +1.0f, +1.0f,  // point cyan
+        // top
+        -1.0f, +1.0f, +1.0f,  // point cyan
+        +1.0f, +1.0f, +1.0f,  // point white
+        -1.0f, +1.0f, -1.0f,  // point green
+        +1.0f, +1.0f, -1.0f,  // point yellow
+        // bottom
+        -1.0f, -1.0f, -1.0f,  // point black
+        +1.0f, -1.0f, -1.0f,  // point red
+        -1.0f, -1.0f, +1.0f,  // point blue
+        +1.0f, -1.0f, +1.0f   // point magenta
+    };
 
-  glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &ret);
-  if (!ret) {
-    char *log;
+    static const GLfloat vColors[] = {
+        // front
+        0.0f, 0.0f, 1.0f,  // blue
+        1.0f, 0.0f, 1.0f,  // magenta
+        0.0f, 1.0f, 1.0f,  // cyan
+        1.0f, 1.0f, 1.0f,  // white
+        // back
+        1.0f, 0.0f, 0.0f,  // red
+        0.0f, 0.0f, 0.0f,  // black
+        1.0f, 1.0f, 0.0f,  // yellow
+        0.0f, 1.0f, 0.0f,  // green
+        // right
+        1.0f, 0.0f, 1.0f,  // magenta
+        1.0f, 0.0f, 0.0f,  // red
+        1.0f, 1.0f, 1.0f,  // white
+        1.0f, 1.0f, 0.0f,  // yellow
+        // left
+        0.0f, 0.0f, 0.0f,  // black
+        0.0f, 0.0f, 1.0f,  // blue
+        0.0f, 1.0f, 0.0f,  // green
+        0.0f, 1.0f, 1.0f,  // cyan
+        // top
+        0.0f, 1.0f, 1.0f,  // cyan
+        1.0f, 1.0f, 1.0f,  // white
+        0.0f, 1.0f, 0.0f,  // green
+        1.0f, 1.0f, 0.0f,  // yellow
+        // bottom
+        0.0f, 0.0f, 0.0f,  // black
+        1.0f, 0.0f, 0.0f,  // red
+        0.0f, 0.0f, 1.0f,  // blue
+        1.0f, 0.0f, 1.0f   // magenta
+    };
 
-    printf("fragment shader compilation failed!:\n");
-    glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &ret);
+    static const GLfloat vNormals[] = {
+        // front
+        +0.0f, +0.0f, +1.0f,  // forward
+        +0.0f, +0.0f, +1.0f,  // forward
+        +0.0f, +0.0f, +1.0f,  // forward
+        +0.0f, +0.0f, +1.0f,  // forward
+        // back
+        +0.0f, +0.0f, -1.0f,  // backbard
+        +0.0f, +0.0f, -1.0f,  // backbard
+        +0.0f, +0.0f, -1.0f,  // backbard
+        +0.0f, +0.0f, -1.0f,  // backbard
+        // right
+        +1.0f, +0.0f, +0.0f,  // right
+        +1.0f, +0.0f, +0.0f,  // right
+        +1.0f, +0.0f, +0.0f,  // right
+        +1.0f, +0.0f, +0.0f,  // right
+        // left
+        -1.0f, +0.0f, +0.0f,  // left
+        -1.0f, +0.0f, +0.0f,  // left
+        -1.0f, +0.0f, +0.0f,  // left
+        -1.0f, +0.0f, +0.0f,  // left
+        // top
+        +0.0f, +1.0f, +0.0f,  // up
+        +0.0f, +1.0f, +0.0f,  // up
+        +0.0f, +1.0f, +0.0f,  // up
+        +0.0f, +1.0f, +0.0f,  // up
+        // bottom
+        +0.0f, -1.0f, +0.0f,  // down
+        +0.0f, -1.0f, +0.0f,  // down
+        +0.0f, -1.0f, +0.0f,  // down
+        +0.0f, -1.0f, +0.0f   // down
+    };
 
-    if (ret > 1) {
-      log = static_cast<char*>(malloc(ret));
-      glGetShaderInfoLog(fragment_shader, ret, NULL, log);
-      printf("%s", log);
-    }
+    if (!InitializeGLProgram())
+      return false;
 
-    return -1;
+    modelviewmatrix_ = glGetUniformLocation(program_, "modelviewMatrix");
+    modelviewprojectionmatrix_ =
+        glGetUniformLocation(program_, "modelviewprojectionMatrix");
+    normalmatrix_ = glGetUniformLocation(program_, "normalMatrix");
+
+    glViewport(0, 0, display_size_.width, display_size_.height);
+    glEnable(GL_CULL_FACE);
+
+    GLintptr positionsoffset = 0;
+    GLintptr colorsoffset = sizeof(vVertices);
+    GLintptr normalsoffset = sizeof(vVertices) + sizeof(vColors);
+    glGenBuffers(1, &vbo_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER,
+                 sizeof(vVertices) + sizeof(vColors) + sizeof(vNormals), 0,
+                 GL_STATIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, positionsoffset, sizeof(vVertices),
+                    &vVertices[0]);
+    glBufferSubData(GL_ARRAY_BUFFER, colorsoffset, sizeof(vColors),
+                    &vColors[0]);
+    glBufferSubData(GL_ARRAY_BUFFER, normalsoffset, sizeof(vNormals),
+                    &vNormals[0]);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0,
+                          reinterpret_cast<const void*>(positionsoffset));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0,
+                          reinterpret_cast<const void*>(normalsoffset));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0,
+                          reinterpret_cast<const void*>(colorsoffset));
+    glEnableVertexAttribArray(2);
+
+    glClearColor(0.0, 0.0, 0.0, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT);
+    return true;
   }
 
-  gl.program = glCreateProgram();
+  bool InitializeGLProgram() {
+    static const char* vertex_shader_source =
+        "uniform mat4 modelviewMatrix;      \n"
+        "uniform mat4 modelviewprojectionMatrix;\n"
+        "uniform mat3 normalMatrix;         \n"
+        "                                   \n"
+        "attribute vec4 in_position;        \n"
+        "attribute vec3 in_normal;          \n"
+        "attribute vec4 in_color;           \n"
+        "\n"
+        "vec4 lightSource = vec4(2.0, 2.0, 20.0, 0.0);\n"
+        "                                   \n"
+        "varying vec4 vVaryingColor;        \n"
+        "                                   \n"
+        "void main()                        \n"
+        "{                                  \n"
+        "    gl_Position = modelviewprojectionMatrix * in_position;\n"
+        "    vec3 vEyeNormal = normalMatrix * in_normal;\n"
+        "    vec4 vPosition4 = modelviewMatrix * in_position;\n"
+        "    vec3 vPosition3 = vPosition4.xyz / vPosition4.w;\n"
+        "    vec3 vLightDir = normalize(lightSource.xyz - vPosition3);\n"
+        "    float diff = max(0.0, dot(vEyeNormal, vLightDir));\n"
+        "    vVaryingColor = vec4(diff * in_color.rgb, 1.0);\n"
+        "}                                  \n";
 
-  glAttachShader(gl.program, vertex_shader);
-  glAttachShader(gl.program, fragment_shader);
+    static const char* fragment_shader_source =
+        "precision mediump float;           \n"
+        "                                   \n"
+        "varying vec4 vVaryingColor;        \n"
+        "                                   \n"
+        "void main()                        \n"
+        "{                                  \n"
+        "    gl_FragColor = vVaryingColor;  \n"
+        "}                                  \n";
 
-  glBindAttribLocation(gl.program, 0, "in_position");
-  glBindAttribLocation(gl.program, 1, "in_normal");
-  glBindAttribLocation(gl.program, 2, "in_color");
+    GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
 
-  glLinkProgram(gl.program);
+    glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
+    glCompileShader(vertex_shader);
 
-  glGetProgramiv(gl.program, GL_LINK_STATUS, &ret);
-  if (!ret) {
-    char *log;
-
-    printf("program linking failed!:\n");
-    glGetProgramiv(gl.program, GL_INFO_LOG_LENGTH, &ret);
-
-    if (ret > 1) {
-      log = static_cast<char*>(malloc(ret));
-      glGetProgramInfoLog(gl.program, ret, NULL, log);
-      printf("%s", log);
-    }
-
-    return -1;
-  }
-
-  glUseProgram(gl.program);
-
-  gl.modelviewmatrix = glGetUniformLocation(gl.program, "modelviewMatrix");
-  gl.modelviewprojectionmatrix =
-      glGetUniformLocation(gl.program, "modelviewprojectionMatrix");
-  gl.normalmatrix = glGetUniformLocation(gl.program, "normalMatrix");
-
-  glViewport(0, 0, drm.mode->hdisplay, drm.mode->vdisplay);
-  glEnable(GL_CULL_FACE);
-
-  gl.positionsoffset = 0;
-  gl.colorsoffset = sizeof(vVertices);
-  gl.normalsoffset = sizeof(vVertices) + sizeof(vColors);
-  glGenBuffers(1, &gl.vbo);
-  glBindBuffer(GL_ARRAY_BUFFER, gl.vbo);
-  glBufferData(GL_ARRAY_BUFFER,
-               sizeof(vVertices) + sizeof(vColors) + sizeof(vNormals), 0,
-               GL_STATIC_DRAW);
-  glBufferSubData(GL_ARRAY_BUFFER, gl.positionsoffset, sizeof(vVertices),
-                  &vVertices[0]);
-  glBufferSubData(GL_ARRAY_BUFFER, gl.colorsoffset, sizeof(vColors),
-                  &vColors[0]);
-  glBufferSubData(GL_ARRAY_BUFFER, gl.normalsoffset, sizeof(vNormals),
-                  &vNormals[0]);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0,
-                        (const GLvoid *)gl.positionsoffset);
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0,
-                        (const GLvoid *)gl.normalsoffset);
-  glEnableVertexAttribArray(1);
-  glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0,
-                        (const GLvoid *)gl.colorsoffset);
-  glEnableVertexAttribArray(2);
-
-  return 0;
-}
-
-static int create_gl_framebuffers(void) {
-  for (size_t i = 0; i < NUM_BUFFERS; i++) {
-    glGenTextures(1, &fbs[i].gl_tex);
-    glBindTexture(GL_TEXTURE_2D, fbs[i].gl_tex);
-    egl.EGLImageTargetTexture2DOES(GL_TEXTURE_2D, (GLeglImageOES)fbs[i].image);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    glGenFramebuffers(1, &fbs[i].gl_fb);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbs[i].gl_fb);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                           fbs[i].gl_tex, 0);
-
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-      printf("failed framebuffer check for created target buffer: %s\n",
-             get_gl_framebuffer_error());
-      glDeleteFramebuffers(1, &fbs[i].gl_fb);
-      glDeleteTextures(1, &fbs[i].gl_tex);
-      return -1;
-    }
-  }
-  return 0;
-}
-
-static void draw(uint32_t i) {
-  ESMatrix modelview;
-
-  /* clear the color buffer */
-  glClearColor(0.5, 0.5, 0.5, 1.0);
-  glClear(GL_COLOR_BUFFER_BIT);
-
-  esMatrixLoadIdentity(&modelview);
-  esTranslate(&modelview, 0.0f, 0.0f, -8.0f);
-  esRotate(&modelview, 45.0f + (0.25f * i), 1.0f, 0.0f, 0.0f);
-  esRotate(&modelview, 45.0f - (0.5f * i), 0.0f, 1.0f, 0.0f);
-  esRotate(&modelview, 10.0f + (0.15f * i), 0.0f, 0.0f, 1.0f);
-
-  GLfloat aspect =
-      (GLfloat)(drm.mode->vdisplay) / (GLfloat)(drm.mode->hdisplay);
-
-  ESMatrix projection;
-  esMatrixLoadIdentity(&projection);
-  esFrustum(&projection, -2.8f, +2.8f, -2.8f * aspect, +2.8f * aspect, 6.0f,
-            10.0f);
-
-  ESMatrix modelviewprojection;
-  esMatrixLoadIdentity(&modelviewprojection);
-  esMatrixMultiply(&modelviewprojection, &modelview, &projection);
-
-  float normal[9];
-  normal[0] = modelview.m[0][0];
-  normal[1] = modelview.m[0][1];
-  normal[2] = modelview.m[0][2];
-  normal[3] = modelview.m[1][0];
-  normal[4] = modelview.m[1][1];
-  normal[5] = modelview.m[1][2];
-  normal[6] = modelview.m[2][0];
-  normal[7] = modelview.m[2][1];
-  normal[8] = modelview.m[2][2];
-
-  glUniformMatrix4fv(gl.modelviewmatrix, 1, GL_FALSE, &modelview.m[0][0]);
-  glUniformMatrix4fv(gl.modelviewprojectionmatrix, 1, GL_FALSE,
-                     &modelviewprojection.m[0][0]);
-  glUniformMatrix3fv(gl.normalmatrix, 1, GL_FALSE, normal);
-
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-  glDrawArrays(GL_TRIANGLE_STRIP, 4, 4);
-  glDrawArrays(GL_TRIANGLE_STRIP, 8, 4);
-  glDrawArrays(GL_TRIANGLE_STRIP, 12, 4);
-  glDrawArrays(GL_TRIANGLE_STRIP, 16, 4);
-  glDrawArrays(GL_TRIANGLE_STRIP, 20, 4);
-}
-
-static void egl_sync_fence() {
-  if (egl.egl_sync_supported) {
-    EGLSyncKHR sync = egl.CreateSyncKHR(egl.display, EGL_SYNC_FENCE_KHR, NULL);
-    glFlush();
-    egl.ClientWaitSyncKHR(egl.display, sync, 0, EGL_FOREVER_KHR);
-  } else {
-    glFinish();
-  }
-}
-
-static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data) {
-  struct drm_fb *fb = static_cast<struct drm_fb*>(data);
-  struct gbm_device *gbm = gbm_bo_get_device(bo);
-
-  if (fb->fb_id)
-    drmModeRmFB(drm.fd, fb->fb_id);
-
-  free(fb);
-}
-
-static struct drm_fb *drm_fb_get_from_bo(struct gbm_bo *bo) {
-  struct drm_fb *fb = static_cast<struct drm_fb*>(gbm_bo_get_user_data(bo));
-  uint32_t width, height, stride, handle;
-  int ret;
-
-  if (fb)
-    return fb;
-
-  fb = static_cast<struct drm_fb*>(calloc(1, sizeof *fb));
-  fb->bo = bo;
-
-  width = gbm_bo_get_width(bo);
-  height = gbm_bo_get_height(bo);
-  stride = gbm_bo_get_stride(bo);
-  handle = gbm_bo_get_handle(bo).u32;
-
-  ret = drmModeAddFB(drm.fd, width, height, 24, 32, stride, handle, &fb->fb_id);
-  if (ret) {
-    printf("failed to create fb: %s\n", strerror(errno));
-    free(fb);
-    return NULL;
-  }
-
-  gbm_bo_set_user_data(bo, fb, drm_fb_destroy_callback);
-
-  return fb;
-}
-
-static void page_flip_handler(int fd, unsigned int frame, unsigned int sec,
-                              unsigned int usec, void *data) {
-  int *waiting_for_flip = static_cast<int*>(data);
-  *waiting_for_flip = 0;
-}
-
-int main(int argc, char *argv[]) {
-  const char *card;
-  fd_set fds;
-  drmEventContext evctx;
-  evctx.version = DRM_EVENT_CONTEXT_VERSION;
-  evctx.page_flip_handler = page_flip_handler;
-  struct gbm_bo *bo;
-  struct drm_fb *fb;
-  uint32_t i = 0;
-  int ret;
-
-  /* check which DRM device to open */
-  if (argc > 1)
-    card = argv[1];
-  else
-    card = "/dev/dri/card0";
-
-  ret = init_drm(card);
-  if (ret) {
-    printf("failed to initialize DRM\n");
-    return ret;
-  }
-
-  FD_ZERO(&fds);
-  FD_SET(0, &fds);
-  FD_SET(drm.fd, &fds);
-
-  ret = init_egl();
-  if (ret) {
-    printf("failed to initialize EGL\n");
-    return ret;
-  }
-
-  ret = init_gbm();
-  if (ret) {
-    printf("failed to initialize GBM\n");
-    return ret;
-  }
-
-  ret = create_framebuffers();
-  if (ret) {
-    printf("failed to create framebuffers\n");
-    return ret;
-  }
-
-  ret = init_gl();
-  if (ret) {
-    printf("failed to initialize EGL\n");
-    return ret;
-  }
-
-  ret = create_gl_framebuffers();
-  if (ret) {
-    printf("failed to initialize EGL\n");
-    return ret;
-  }
-
-  /* clear the color buffer */
-  glClearColor(0.5, 0.5, 0.5, 1.0);
-  glClear(GL_COLOR_BUFFER_BIT);
-  egl_sync_fence();
-
-  gbm.front_buffer = 0;
-  const struct framebuffer *back_fb = &fbs[gbm.front_buffer ^ 1];
-
-  /* set mode: */
-  ret = drmModeSetCrtc(drm.fd, drm.crtc_id, back_fb->fb_id, 0, 0,
-                       &drm.connector_id, 1, drm.mode);
-  if (ret) {
-    printf("failed to set mode: %s\n", strerror(errno));
-    return ret;
-  }
-
-  gbm.front_buffer ^= 1;
-  int got_user_input = 0;
-  struct timeval lasttime;
-  gettimeofday(&lasttime, NULL);
-  int num_frames = 0;
-  const int one_sec = 1000000;
-  while (1) {
-    int waiting_for_flip = 1;
-
-    const struct framebuffer *back_fb = &fbs[gbm.front_buffer ^ 1];
-    glBindFramebuffer(GL_FRAMEBUFFER, back_fb->gl_fb);
-    draw(i++);
-    egl_sync_fence();
-
-    /*
-     * Here you could also update drm plane layers if you want
-     * hw composition
-     */
-
-    ret = drmModePageFlip(drm.fd, drm.crtc_id, back_fb->fb_id,
-                          DRM_MODE_PAGE_FLIP_EVENT, &waiting_for_flip);
-    if (ret) {
-      printf("failed to queue page flip: %s\n", strerror(errno));
-      return -1;
-    }
-
-    while (waiting_for_flip) {
-      ret = select(drm.fd + 1, &fds, NULL, NULL, NULL);
-      if (ret < 0) {
-        printf("select err: %s\n", strerror(errno));
-        return ret;
-      } else if (ret == 0) {
-        printf("select timeout!\n");
-        return -1;
-      } else if (FD_ISSET(0, &fds)) {
-        printf("exit due to user-input\n");
-        got_user_input = 1;
-        break;
-      } else if (FD_ISSET(drm.fd, &fds)) {
-        drmHandleEvent(drm.fd, &evctx);
+    GLint ret = 0;
+    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &ret);
+    if (!ret) {
+      printf("vertex shader compilation failed!:\n");
+      glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &ret);
+      if (ret > 1) {
+        char* log = static_cast<char*>(malloc(ret));
+        glGetShaderInfoLog(vertex_shader, ret, NULL, log);
+        printf("%s\n", log);
+        free(log);
       }
+      return false;
     }
 
-    if (got_user_input) {
-      break;
+    GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+
+    glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
+    glCompileShader(fragment_shader);
+
+    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &ret);
+    if (!ret) {
+      printf("fragment shader compilation failed!:\n");
+      glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &ret);
+      if (ret > 1) {
+        char* log = static_cast<char*>(malloc(ret));
+        glGetShaderInfoLog(fragment_shader, ret, NULL, log);
+        printf("%s\n", log);
+        free(log);
+      }
+      return false;
     }
 
-    gbm.front_buffer ^= 1;
+    program_ = glCreateProgram();
+
+    glAttachShader(program_, vertex_shader);
+    glAttachShader(program_, fragment_shader);
+
+    glBindAttribLocation(program_, 0, "in_position");
+    glBindAttribLocation(program_, 1, "in_normal");
+    glBindAttribLocation(program_, 2, "in_color");
+
+    glLinkProgram(program_);
+
+    glGetProgramiv(program_, GL_LINK_STATUS, &ret);
+    if (!ret) {
+      printf("program linking failed!:\n");
+      glGetProgramiv(program_, GL_INFO_LOG_LENGTH, &ret);
+      if (ret > 1) {
+        char* log = static_cast<char*>(malloc(ret));
+        glGetProgramInfoLog(program_, ret, NULL, log);
+        printf("%s\n", log);
+        free(log);
+      }
+      return false;
+    }
+
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+    glUseProgram(program_);
+    return true;
+  }
+
+  void DidSwapBuffer(GLuint gl_framebuffer, unsigned long usec) {
+    Draw(usec);
+
+    static int num_frames = 0;
+    static unsigned long lasttime = 0;
+    static const size_t one_sec = 1000000;
     num_frames++;
-    struct timeval currenttime;
-    gettimeofday(&currenttime, NULL);
-    long elapsed = (currenttime.tv_sec - lasttime.tv_sec) * one_sec +
-                   currenttime.tv_usec - lasttime.tv_usec;
+    unsigned long elapsed = usec - lasttime;
     if (elapsed > one_sec) {
       printf("FPS: %4f \n", num_frames / ((double)elapsed / one_sec));
       num_frames = 0;
-      lasttime = currenttime;
+      lasttime = usec;
     }
   }
 
-  for (size_t i = 0; i < NUM_BUFFERS; i++) {
-    glDeleteFramebuffers(1, &fbs[i].gl_fb);
-    glDeleteTextures(1, &fbs[i].gl_tex);
-    egl.DestroyImageKHR(egl.display, fbs[i].image);
-    drmModeRmFB(drm.fd, fbs[i].fb_id);
-    close(fbs[i].fd);
-    gbm_bo_destroy(fbs[i].bo);
+  void Draw(unsigned long usec) {
+    // 100% every 10 sec
+    static const int interval = 10000000.f;
+    float progress = 1.f * (usec % interval) / interval;
+    float red = pow(cos(M_PI * 2 * progress), 2) / 3;
+    float green = pow(cos(M_PI * 2 * (progress + 0.33)), 2) / 3;
+    float blue = pow(cos(M_PI * 2 * (progress + 0.66)), 2) / 3;
+    glClearColor(red, green, blue, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // convert to 200ms precision, which covers 60FPS very enough.
+    int i = usec / 5000;
+    ged::Matrix modelview;
+    modelview.Translate(0.0f, 0.0f, -8.0f);
+    modelview.Rotate(45.0f + (0.25f * i), 1.0f, 0.0f, 0.0f);
+    modelview.Rotate(45.0f - (0.5f * i), 0.0f, 1.0f, 0.0f);
+    modelview.Rotate(10.0f + (0.15f * i), 0.0f, 0.0f, 1.0f);
+
+    GLfloat aspect =
+        (GLfloat)(display_size_.width) / (GLfloat)(display_size_.height);
+
+    ged::Matrix projection;
+    float field_of_view = 35.f;
+    projection.Perspective(field_of_view, aspect, 6.f, 10.f);
+
+    ged::Matrix modelviewprojection = modelview;
+    modelviewprojection.MatrixMultiply(projection);
+
+    glUniformMatrix4fv(modelviewmatrix_, 1, GL_FALSE, modelview.Data());
+    glUniformMatrix4fv(modelviewprojectionmatrix_, 1, GL_FALSE,
+                       modelviewprojection.Data());
+    float normal[9] = {};
+    modelview.Get3x3(&normal[0]);
+    glUniformMatrix3fv(normalmatrix_, 1, GL_FALSE, normal);
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDrawArrays(GL_TRIANGLE_STRIP, 4, 4);
+    glDrawArrays(GL_TRIANGLE_STRIP, 8, 4);
+    glDrawArrays(GL_TRIANGLE_STRIP, 12, 4);
+    glDrawArrays(GL_TRIANGLE_STRIP, 16, 4);
+    glDrawArrays(GL_TRIANGLE_STRIP, 20, 4);
   }
 
-  eglDestroyContext(egl.display, egl.context);
-  eglTerminate(egl.display);
+  std::unique_ptr<ged::EGLDRMGlue> egl_;
+  ged::EGLDRMGlue::Size display_size_ = {};
+  GLuint program_ = 0;
+  GLint modelviewmatrix_ = 0;
+  GLint modelviewprojectionmatrix_ = 0;
+  GLint normalmatrix_ = 0;
+  GLuint vbo_ = 0;
+};
 
-  return ret;
+}  // namespace demo
+
+int main(int argc, char* argv[]) {
+  /* check which DRM device to open */
+  std::string card = "/dev/dri/card0";
+  if (argc > 1)
+    card = argv[1];
+
+  std::unique_ptr<demo::ES2Cube> demo(new demo::ES2Cube());
+  if (!demo->Initialize(card)) {
+    fprintf(stderr, "failed to initialize ES2Cube.\n");
+    return -1;
+  }
+
+  if (!demo->Run()) {
+    fprintf(stderr, "something wrong happened.\n");
+    return -1;
+  }
+
+  return 0;
 }
