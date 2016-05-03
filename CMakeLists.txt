@@ -1,5 +1,4 @@
 #
-#  Copyright (c) 2012 Rob Clark <rob@ti.com>
 #  Copyright (c) 2016 Dongseong Hwang <dongseong.hwang@intel.com>
 #
 #  Permission is hereby granted, free of charge, to any person obtaining a
@@ -22,24 +21,34 @@
 #  SOFTWARE.
 #
 
-bin_PROGRAMS = gbm_es2_demo
+cmake_minimum_required(VERSION 2.8)
+project(GBM_ES2_Demo)
 
-gbm_es2_demo_LDFLAGS = \
-	-no-undefined
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=c++11")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/run)
+set(CMAKE_BUILD_TYPE Debug)
 
-gbm_es2_demo_LDADD = \
-	$(DRM_LIBS) \
-	$(GBM_LIBS) \
-	$(EGL_LIBS) \
-	$(GLES2_LIBS)
+# add the binary tree to the search path for include files
+# so that we will find TutorialConfig.h
+include_directories("${PROJECT_BINARY_DIR}")
 
-gbm_es2_demo_CPPFLAGS = \
-	-O0 -g -lm \
-	$(DRM_CFLAGS) \
-	$(GBM_CFLAGS) \
-	$(EGL_CFLAGS) \
-	$(GLES2_CFLAGS)
+set(PROGRAM gbm_es2_demo)
+FILE(GLOB SOURCES *.cpp)
+FILE(GLOB HEADERS *.h)
 
-gbm_es2_demo_SOURCES = \
-	gbm_es2_demo.cpp \
-	esTransform.cpp
+include (FindPkgConfig)
+
+pkg_check_modules (DRM libdrm)
+pkg_check_modules (GBM gbm)
+pkg_check_modules (EGL egl)
+pkg_check_modules (GLESV2 glesv2)
+include_directories(
+    ${DRM_INCLUDE_DIRS}
+    ${GBM_INCLUDE_DIRS}
+    ${EGL_INCLUDE_DIRS}
+    ${GLESV2_INCLUDE_DIRS}
+)
+set(LIBS ${LIBS} ${DRM_LIBRARIES} ${GBM_LIBRARIES} ${EGL_LIBRARIES} ${GLESV2_LIBRARIES})
+
+add_executable(${PROGRAM} ${SOURCES} ${HEADERS})
+target_link_libraries(${PROGRAM} ${LIBS})
