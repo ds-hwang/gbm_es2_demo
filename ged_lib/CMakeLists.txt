@@ -21,19 +21,29 @@
 #  SOFTWARE.
 #
 
-cmake_minimum_required(VERSION 2.8)
-project(GBM_ES2_Demo)
+set(GED_LIB ged)
+FILE(GLOB SOURCES *.cpp)
+FILE(GLOB HEADERS *.h)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=c++11")
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/run)
-set(CMAKE_BUILD_TYPE Debug)
+include (FindPkgConfig)
 
-# add the binary tree to the search path for include files
-# so that we will find TutorialConfig.h
-include_directories("${PROJECT_BINARY_DIR}")
+pkg_check_modules (DRM libdrm)
+pkg_check_modules (GBM gbm)
+pkg_check_modules (EGL egl)
+pkg_check_modules (GLESV2 glesv2)
+include_directories(
+    ${DRM_INCLUDE_DIRS}
+    ${GBM_INCLUDE_DIRS}
+    ${EGL_INCLUDE_DIRS}
+    ${GLESV2_INCLUDE_DIRS}
+)
+set(LIBS ${LIBS} ${DRM_LIBRARIES} ${GBM_LIBRARIES} ${EGL_LIBRARIES} ${GLESV2_LIBRARIES})
 
-include_directories ("${PROJECT_SOURCE_DIR}/ged_lib")
-add_subdirectory (ged_lib)
+# add the binary tree directory to the search path for
+# include files
+include_directories( ${CMAKE_CURRENT_BINARY_DIR} )
 
-include_directories ("${PROJECT_SOURCE_DIR}/demo")
-add_subdirectory (demo)
+# add the main library
+add_library(${GED_LIB} ${SOURCES} ${HEADERS})
+target_link_libraries(${GED_LIB} ${LIBS})
+MESSAGE(${GED_LIB} " links " ${LIBS})
