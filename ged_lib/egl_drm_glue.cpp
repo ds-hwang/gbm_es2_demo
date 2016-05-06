@@ -28,6 +28,7 @@
 #include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -42,6 +43,163 @@
 #define NUM_BUFFERS 2
 
 namespace ged {
+namespace {
+
+struct EGLGlue {
+  EGLDisplay display;
+  EGLConfig config;
+  EGLContext context;
+
+  // Names are the original gl/egl function names with the prefix chopped off.
+  PFNEGLCREATEIMAGEKHRPROC CreateImageKHR;
+  PFNEGLDESTROYIMAGEKHRPROC DestroyImageKHR;
+  PFNGLEGLIMAGETARGETTEXTURE2DOESPROC EGLImageTargetTexture2DOES;
+  PFNEGLCREATESYNCKHRPROC CreateSyncKHR;
+  PFNEGLCLIENTWAITSYNCKHRPROC ClientWaitSyncKHR;
+  bool egl_sync_supported;
+};
+
+const char* EglGetError() {
+  switch (eglGetError()) {
+    case EGL_SUCCESS:
+      return "EGL_SUCCESS";
+    case EGL_NOT_INITIALIZED:
+      return "EGL_NOT_INITIALIZED";
+    case EGL_BAD_ACCESS:
+      return "EGL_BAD_ACCESS";
+    case EGL_BAD_ALLOC:
+      return "EGL_BAD_ALLOC";
+    case EGL_BAD_ATTRIBUTE:
+      return "EGL_BAD_ATTRIBUTE";
+    case EGL_BAD_CONTEXT:
+      return "EGL_BAD_CONTEXT";
+    case EGL_BAD_CONFIG:
+      return "EGL_BAD_CONFIG";
+    case EGL_BAD_CURRENT_SURFACE:
+      return "EGL_BAD_CURRENT_SURFACE";
+    case EGL_BAD_DISPLAY:
+      return "EGL_BAD_DISPLAY";
+    case EGL_BAD_SURFACE:
+      return "EGL_BAD_SURFACE";
+    case EGL_BAD_MATCH:
+      return "EGL_BAD_MATCH";
+    case EGL_BAD_PARAMETER:
+      return "EGL_BAD_PARAMETER";
+    case EGL_BAD_NATIVE_PIXMAP:
+      return "EGL_BAD_NATIVE_PIXMAP";
+    case EGL_BAD_NATIVE_WINDOW:
+      return "EGL_BAD_NATIVE_WINDOW";
+    case EGL_CONTEXT_LOST:
+      return "EGL_CONTEXT_LOST";
+    default:
+      return "EGL_???";
+  }
+}
+
+class StreamTextureImpl : public StreamTexture {
+ public:
+  static std::unique_ptr<StreamTexture> Create(struct gbm_device* gbm,
+                                               const EGLGlue& egl,
+                                               size_t width,
+                                               size_t height) {
+    std::unique_ptr<StreamTextureImpl> texture(
+        new StreamTextureImpl(egl, width, height));
+    if (texture->Initialize(gbm))
+      return texture;
+    return nullptr;
+  }
+
+  ~StreamTextureImpl() override {
+    glDeleteTextures(1, &gl_tex_);
+    egl_->DestroyImageKHR(egl_->display, image_);
+    close(fd_);
+    gbm_bo_destroy(bo_);
+  }
+
+  void* Map() final {
+    assert(addr_ == nullptr);
+    size_t size = dimension_.stride * dimension_.height;
+    addr_ = mmap(nullptr, size, (PROT_READ | PROT_WRITE), MAP_SHARED, fd_, 0);
+    if (addr_ == MAP_FAILED)
+      return nullptr;
+    return addr_;
+  }
+
+  void Unmap() final {
+    assert(addr_ != nullptr);
+    size_t size = dimension_.stride * dimension_.height;
+    munmap(addr_, size);
+    addr_ = nullptr;
+  }
+
+  GLuint GetTextureID() const final { return gl_tex_; }
+  Dimension GetDimension() const final { return dimension_; }
+
+ private:
+  StreamTextureImpl(const EGLGlue& egl, size_t width, size_t height)
+      : egl_(&egl), dimension_() {
+    dimension_.width = width;
+    dimension_.height = height;
+  }
+
+  bool Initialize(struct gbm_device* gbm) {
+    bo_ = gbm_bo_create(gbm, dimension_.width, dimension_.height,
+                        GBM_FORMAT_ARGB8888, GBM_BO_USE_LINEAR);
+    if (!bo_) {
+      fprintf(stderr, "failed to create a gbm buffer.\n");
+      return false;
+    }
+
+    fd_ = gbm_bo_get_fd(bo_);
+    if (fd_ < 0) {
+      fprintf(stderr, "failed to get fb for bo: %d", fd_);
+      return false;
+    }
+
+    dimension_.stride = gbm_bo_get_stride(bo_);
+    EGLint offset = 0;
+    const EGLint khr_image_attrs[] = {EGL_DMA_BUF_PLANE0_FD_EXT,
+                                      fd_,
+                                      EGL_WIDTH,
+                                      dimension_.width,
+                                      EGL_HEIGHT,
+                                      dimension_.height,
+                                      EGL_LINUX_DRM_FOURCC_EXT,
+                                      GBM_FORMAT_ARGB8888,
+                                      EGL_DMA_BUF_PLANE0_PITCH_EXT,
+                                      dimension_.stride,
+                                      EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+                                      offset,
+                                      EGL_NONE};
+
+    image_ = egl_->CreateImageKHR(
+        egl_->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
+        nullptr /* no client buffer */, khr_image_attrs);
+    if (image_ == EGL_NO_IMAGE_KHR) {
+      fprintf(stderr, "failed to make image from buffer object: %s\n",
+              EglGetError());
+      return false;
+    }
+
+    glGenTextures(1, &gl_tex_);
+    glBindTexture(GL_TEXTURE_2D, gl_tex_);
+    egl_->EGLImageTargetTexture2DOES(GL_TEXTURE_2D, image_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return true;
+  }
+
+  const EGLGlue* const egl_;
+  struct gbm_bo* bo_ = nullptr;
+  int fd_ = -1;
+  EGLImageKHR image_ = nullptr;
+  GLuint gl_tex_ = 0;
+  Dimension dimension_;
+  void* addr_ = nullptr;
+};
+
+}  // namespace
 
 class EGLDRMGlue::Impl {
  public:
@@ -104,6 +262,11 @@ class EGLDRMGlue::Impl {
     return {display_size.width, display_size.height};
   }
 
+  std::unique_ptr<StreamTexture> CreateStreamTexture(size_t width,
+                                                     size_t height) {
+    return StreamTextureImpl::Create(gbm_, egl_, width, height);
+  }
+
   bool Run() {
     fd_set fds;
     drmEventContext evctx = {};
@@ -163,9 +326,10 @@ class EGLDRMGlue::Impl {
         (PFNEGLCLIENTWAITSYNCKHRPROC)eglGetProcAddress("eglClientWaitSyncKHR");
     if (!egl_.CreateImageKHR || !egl_.DestroyImageKHR ||
         !egl_.EGLImageTargetTexture2DOES) {
-      fprintf(stderr,
-              "eglGetProcAddress returned NULL for a required extension entry "
-              "point.\n");
+      fprintf(
+          stderr,
+          "eglGetProcAddress returned nullptr for a required extension entry "
+          "point.\n");
       return false;
     }
     if (egl_.CreateSyncKHR && egl_.ClientWaitSyncKHR) {
@@ -207,7 +371,7 @@ class EGLDRMGlue::Impl {
                                              EGL_NONE};
     egl_.context = eglCreateContext(egl_.display, egl_.config, EGL_NO_CONTEXT,
                                     context_attribs);
-    if (egl_.context == NULL) {
+    if (egl_.context == nullptr) {
       fprintf(stderr, "failed to create context\n");
       return false;
     }
@@ -243,48 +407,11 @@ class EGLDRMGlue::Impl {
   void EGLSyncFence() {
     if (egl_.egl_sync_supported) {
       EGLSyncKHR sync =
-          egl_.CreateSyncKHR(egl_.display, EGL_SYNC_FENCE_KHR, NULL);
+          egl_.CreateSyncKHR(egl_.display, EGL_SYNC_FENCE_KHR, nullptr);
       glFlush();
       egl_.ClientWaitSyncKHR(egl_.display, sync, 0, EGL_FOREVER_KHR);
     } else {
       glFinish();
-    }
-  }
-
-  static const char* EglGetError() {
-    switch (eglGetError()) {
-      case EGL_SUCCESS:
-        return "EGL_SUCCESS";
-      case EGL_NOT_INITIALIZED:
-        return "EGL_NOT_INITIALIZED";
-      case EGL_BAD_ACCESS:
-        return "EGL_BAD_ACCESS";
-      case EGL_BAD_ALLOC:
-        return "EGL_BAD_ALLOC";
-      case EGL_BAD_ATTRIBUTE:
-        return "EGL_BAD_ATTRIBUTE";
-      case EGL_BAD_CONTEXT:
-        return "EGL_BAD_CONTEXT";
-      case EGL_BAD_CONFIG:
-        return "EGL_BAD_CONFIG";
-      case EGL_BAD_CURRENT_SURFACE:
-        return "EGL_BAD_CURRENT_SURFACE";
-      case EGL_BAD_DISPLAY:
-        return "EGL_BAD_DISPLAY";
-      case EGL_BAD_SURFACE:
-        return "EGL_BAD_SURFACE";
-      case EGL_BAD_MATCH:
-        return "EGL_BAD_MATCH";
-      case EGL_BAD_PARAMETER:
-        return "EGL_BAD_PARAMETER";
-      case EGL_BAD_NATIVE_PIXMAP:
-        return "EGL_BAD_NATIVE_PIXMAP";
-      case EGL_BAD_NATIVE_WINDOW:
-        return "EGL_BAD_NATIVE_WINDOW";
-      case EGL_CONTEXT_LOST:
-        return "EGL_CONTEXT_LOST";
-      default:
-        return "EGL_???";
     }
   }
 
@@ -352,7 +479,7 @@ class EGLDRMGlue::Impl {
 
     framebuffer.image =
         egl_.CreateImageKHR(egl_.display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
-                            NULL /* no client buffer */, khr_image_attrs);
+                            nullptr /* no client buffer */, khr_image_attrs);
     if (framebuffer.image == EGL_NO_IMAGE_KHR) {
       fprintf(stderr, "failed to make image from buffer object: %s\n",
               EglGetError());
@@ -361,8 +488,7 @@ class EGLDRMGlue::Impl {
 
     glGenTextures(1, &framebuffer.gl_tex);
     glBindTexture(GL_TEXTURE_2D, framebuffer.gl_tex);
-    egl_.EGLImageTargetTexture2DOES(GL_TEXTURE_2D,
-                                    (GLeglImageOES)framebuffer.image);
+    egl_.EGLImageTargetTexture2DOES(GL_TEXTURE_2D, framebuffer.image);
     glBindTexture(GL_TEXTURE_2D, 0);
 
     glGenFramebuffers(1, &framebuffer.gl_fb);
@@ -406,21 +532,7 @@ class EGLDRMGlue::Impl {
 
   struct gbm_device* gbm_ = nullptr;
 
-  struct EGLGlue {
-    EGLDisplay display;
-    EGLConfig config;
-    EGLContext context;
-
-    // Names are the original gl/egl function names with the prefix chopped off.
-    PFNEGLCREATEIMAGEKHRPROC CreateImageKHR;
-    PFNEGLDESTROYIMAGEKHRPROC DestroyImageKHR;
-    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC EGLImageTargetTexture2DOES;
-    PFNEGLCREATESYNCKHRPROC CreateSyncKHR;
-    PFNEGLCLIENTWAITSYNCKHRPROC ClientWaitSyncKHR;
-    bool egl_sync_supported;
-  };
   EGLGlue egl_;
-
   unsigned int front_buffer_ = 0;
   Framebuffer framebuffers_[NUM_BUFFERS];
 
@@ -452,6 +564,11 @@ bool EGLDRMGlue::Initialize(std::unique_ptr<DRMModesetter> drm,
 
 EGLDRMGlue::Size EGLDRMGlue::GetDisplaySize() const {
   return impl_->GetDisplaySize();
+}
+
+std::unique_ptr<StreamTexture> EGLDRMGlue::CreateStreamTexture(size_t width,
+                                                               size_t height) {
+  return impl_->CreateStreamTexture(width, height);
 }
 
 bool EGLDRMGlue::Run() {

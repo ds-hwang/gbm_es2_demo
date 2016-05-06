@@ -21,12 +21,14 @@
 #  SOFTWARE.
 #
 
-set(PROGRAM gbm_es2_demo)
-FILE(GLOB SOURCES *.cpp)
-FILE(GLOB HEADERS *.h)
-
 set (EXTRA_LIBS ${EXTRA_LIBS} ged)
 
-add_executable(${PROGRAM} ${SOURCES} ${HEADERS})
+set(PROGRAM gbm_es2_demo)
+add_executable(${PROGRAM} ${PROGRAM}.cpp)
+target_link_libraries(${PROGRAM} ${EXTRA_LIBS})
+MESSAGE(${PROGRAM} " links " ${EXTRA_LIBS})
+
+set(PROGRAM dma_buf_mmap_demo)
+add_executable(${PROGRAM} ${PROGRAM}.cpp)
 target_link_libraries(${PROGRAM} ${EXTRA_LIBS})
 MESSAGE(${PROGRAM} " links " ${EXTRA_LIBS})

@@ -34,6 +34,20 @@ typedef unsigned int GLuint;
 typedef std::function<void(GLuint /* gl_framebuffer */,
                            unsigned long /* usec */)> SwapBuffersCallback;
 
+class StreamTexture {
+ public:
+  virtual ~StreamTexture() = default;
+  virtual void* Map() = 0;
+  virtual void Unmap() = 0;
+  virtual GLuint GetTextureID() const = 0;
+  struct Dimension {
+    size_t width = 0;
+    size_t height = 0;
+    size_t stride = 0;
+  };
+  virtual Dimension GetDimension() const = 0;
+};
+
 /*
  * EGLDRMGlue provides API to handle page-flips along with VBlank interval.
  */
@@ -52,6 +66,9 @@ class EGLDRMGlue {
     size_t height;
   };
   Size GetDisplaySize() const;
+
+  std::unique_ptr<StreamTexture> CreateStreamTexture(size_t width,
+                                                     size_t height);
 
   bool Run();
 
