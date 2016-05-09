@@ -13,7 +13,7 @@
 ```
 
 # Run
-* I successfully run it on Ubuntu as well as ChromeOS.
+* I successfully run it on Ubuntu, ChromeOS and Yocto.
 
 ## Ubuntu
 * Go to tty1 with Ctrl + Alt + F1
@@ -28,6 +28,12 @@
 or
 > dma_buf_mmap_demo
 ```
+
+## Yocto
+* The easiest way to build embedded linux image is to use Yocto.
+* I make Yocto recipes to make standalone emebeded OpenGL ES2 demo image.
+* Check [Yocto GBM ES2 Demo](https://github.com/ds-hwang/yocto-gbm_es2_demo)
+* Enjoy building Linux image from the scratch.
 
 # Demo detail
 ## gbm_es2_demo
@@ -58,3 +64,4 @@ or
 * [My ChromeOS dma-test demo](https://chromium-review.googlesource.com/#/c/340953/5)
 * [greatest drm tutorial by dvdhrm](https://github.com/dvdhrm/docs)
 * [kmscube by robclark](https://github.com/robclark/kmscube)
+
