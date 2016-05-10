@@ -1,19 +1,24 @@
 # GBM ES2 Demo
-* Example OpenGL ES2 demo using GBM and DRM(KMS) modesetting
+* Example OpenGL ES2 demo using GBM and DRM (KMS) modesetting
 * This shows how ChromeOS renders GLES2 contents on the screen.
-* It's the best way for embedded device to use OpenGL ES2/3, because of escape of X11 dependency. (more fast and less battery)
+* It uses OpenGL ES2/3 without X11 dependency, so it fits pretty good with the embedded devices world.
 
 ![Alt text](https://github.com/ds-hwang/gbm_es2_demo/blob/master/images/screenshot.jpg "dma_buf_mmap_demo screenshot")
 
 # Build
+* If you are on Ubuntu, first make sure you have the dependencies installed
 ```
-> mkdir build; cp build
+> sudo apt-get install libgles2-mesa-dev libgbm-dev
+```
+
+```
+> mkdir build; cd build
 > cmake ../
 > make
 ```
 
 # Run
-* I successfully run it on Ubuntu, ChromeOS and Yocto.
+* I have successfully ran it on Ubuntu, ChromeOS and Yocto.
 
 ## Ubuntu
 * Go to tty1 with Ctrl + Alt + F1
