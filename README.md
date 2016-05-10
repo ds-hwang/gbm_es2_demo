@@ -1,7 +1,7 @@
 # GBM ES2 Demo
 * Example OpenGL ES2 demo using GBM and DRM(KMS) modesetting
 * This shows how ChromeOS renders GLES2 contents on the screen.
-* It's the best way for embedded device to use OpenGL ES2/3.
+* It's the best way for embedded device to use OpenGL ES2/3, because of escape of X11 dependency. (more fast and less battery)
 
 ![Alt text](https://github.com/ds-hwang/gbm_es2_demo/blob/master/images/screenshot.jpg "dma_buf_mmap_demo screenshot")
 
