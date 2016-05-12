@@ -50,6 +50,7 @@ or
 * Same to gbm_es2_demo except for updating cube surface using dma_buf mmap
 * It's very nice demo to show how Chromium zero-copy texture upload works. Chromium doesn't use glTexImage2D to update texture thank to new dma_buf mmap API. For more Chromium detail, check [the chrome issue](crbug.com/475633)
 * After Linux kernel v4.6, you can use following code. (currently only Intel Architecture supports it)
+* [Tiago Vignatti](https://github.com/tiagovignatti) made [this change](http://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=c11e391da2a8fe973c3c2398452000bed505851e) in kernel.
 ```
   void* data = mmap(dma_buf_fd)
   update contents on |data|
