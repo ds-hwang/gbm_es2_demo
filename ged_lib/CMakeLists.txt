@@ -28,9 +28,19 @@ FILE(GLOB HEADERS *.h)
 include (FindPkgConfig)
 
 pkg_check_modules (DRM libdrm)
-pkg_check_modules (GBM gbm)
-pkg_check_modules (EGL egl)
-pkg_check_modules (GLESV2 glesv2)
+#pkg_check_modules (GBM gbm)
+#pkg_check_modules (EGL egl)
+#pkg_check_modules (GLESV2 glesv2)
+
+set(DRM_INCLUDE_DIRS "/usr/include/libdrm")
+set(GBM_INCLUDE_DIRS "/build/amd64-generic/usr/include")
+set(EGL_INCLUDE_DIRS "")
+set(GLESV2_INCLUDE_DIRS "/build/amd64-generic/usr/include")
+set(DRM_LIBRARIES "drm")
+set(GBM_LIBRARIES "gbm")
+set(EGL_LIBRARIES "EGL")
+set(GLESV2_LIBRARIES "GLESv2")
+
 include_directories(
     ${DRM_INCLUDE_DIRS}
     ${GBM_INCLUDE_DIRS}

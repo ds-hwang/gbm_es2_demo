@@ -23,6 +23,14 @@
 
 set (EXTRA_LIBS ${EXTRA_LIBS} ged)
 
+
+set(GLESV2_INCLUDE_DIRS "/build/amd64-generic/usr/include")
+include_directories(
+    ${GLESV2_INCLUDE_DIRS}
+)
+
+link_directories("/build/amd64-generic/usr/lib64/")
+
 set(PROGRAM gbm_es2_demo)
 add_executable(${PROGRAM} ${PROGRAM}.cpp)
 target_link_libraries(${PROGRAM} ${EXTRA_LIBS})
