@@ -105,7 +105,7 @@ class StreamTextureImpl : public StreamTexture {
     std::unique_ptr<StreamTextureImpl> texture(
         new StreamTextureImpl(egl, width, height));
     if (texture->Initialize(gbm))
-      return texture;
+      return std::move(texture);
     return nullptr;
   }
 
@@ -338,7 +338,7 @@ class EGLDRMGlue::Impl {
       egl_.egl_sync_supported = false;
     }
 
-    egl_.display = eglGetDisplay(gbm_);
+    egl_.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 
     EGLint major, minor = 0;
     if (!eglInitialize(egl_.display, &major, &minor)) {
