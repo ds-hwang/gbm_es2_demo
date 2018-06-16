@@ -1,0 +1,15 @@
+[package]
+name = "gbm_es2_rust"
+version = "0.1.0"
+authors = ["Joone Hur <joone.hur@intel.com>"]
+
+[dependencies]
+libc = "0.2.18"
+nix = "0.8.0"
+drm = "0.3.3"
+egl = "0.2.7"
+cgmath = "0.14.1"
+gl = "0.6"
+gbm = { git = "https://github.com/joone/gbm.rs.git" }
+libudev = "0.2.0"
+cognitive-graphics = "0.1.0"
