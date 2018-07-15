@@ -525,34 +525,6 @@ static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data) {
   free(fb);
 }
 
-static struct drm_fb *drm_fb_get_from_bo(struct gbm_bo *bo) {
-  struct drm_fb *fb = gbm_bo_get_user_data(bo);
-  uint32_t width, height, stride, handle;
-  int ret;
-
-  if (fb)
-    return fb;
-
-  fb = calloc(1, sizeof *fb);
-  fb->bo = bo;
-
-  width = gbm_bo_get_width(bo);
-  height = gbm_bo_get_height(bo);
-  stride = gbm_bo_get_stride(bo);
-  handle = gbm_bo_get_handle(bo).u32;
-
-  ret = drmModeAddFB(drm.fd, width, height, 24, 32, stride, handle, &fb->fb_id);
-  if (ret) {
-    printf("failed to create fb: %s\n", strerror(errno));
-    free(fb);
-    return NULL;
-  }
-
-  gbm_bo_set_user_data(bo, fb, drm_fb_destroy_callback);
-
-  return fb;
-}
-
 static void page_flip_handler(int fd, unsigned int frame, unsigned int sec,
                               unsigned int usec, void *data) {
   int *waiting_for_flip = data;
