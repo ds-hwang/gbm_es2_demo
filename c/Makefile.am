@@ -21,7 +21,27 @@
 #  SOFTWARE.
 #
 
-bin_PROGRAMS = kmscube_animation kmstriangle
+bin_PROGRAMS = kmscube kmscube_animation kmstriangle
+
+kmscube_LDFLAGS = \
+	-no-undefined
+
+kmscube_LDADD = \
+	$(DRM_LIBS) \
+	$(GBM_LIBS) \
+	$(EGL_LIBS) \
+	$(GLES2_LIBS)
+
+kmscube_CFLAGS = \
+	-O0 -g -lm \
+	$(DRM_CFLAGS) \
+	$(GBM_CFLAGS) \
+	$(EGL_CFLAGS) \
+	$(GLES2_CFLAGS)
+
+kmscube_SOURCES = \
+	kmscube.c \
+	esTransform.c
 
 kmscube_animation_LDFLAGS = \
 	-no-undefined
