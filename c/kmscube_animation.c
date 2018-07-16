@@ -422,9 +422,9 @@ static int init_gl(void) {
 
   static const GLfloat vColors[] = {
       // front
-      0.0f, 0.0f, 1.0f, // blue
-      1.0f, 0.0f, 1.0f, // magenta
-      0.0f, 1.0f, 1.0f, // cyan
+      1.0f, 1.0f, 1.0f, // blue
+      1.0f, 1.0f, 1.0f, // magenta
+      1.0f, 1.0f, 1.0f, // cyan
       1.0f, 1.0f, 1.0f, // white
       // back
       1.0f, 0.0f, 0.0f, // red
