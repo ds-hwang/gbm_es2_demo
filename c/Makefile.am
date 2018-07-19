@@ -1,0 +1,84 @@
+#
+#  Copyright (c) 2012 Rob Clark <rob@ti.com>
+#
+#  Permission is hereby granted, free of charge, to any person obtaining a
+#  copy of this software and associated documentation files (the "Software"),
+#  to deal in the Software without restriction, including without limitation
+#  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+#  and/or sell copies of the Software, and to permit persons to whom the
+#  Software is furnished to do so, subject to the following conditions:
+#
+#  The above copyright notice and this permission notice (including the next
+#  paragraph) shall be included in all copies or substantial portions of the
+#  Software.
+#
+#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+#  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#  SOFTWARE.
+#
+
+bin_PROGRAMS = kmscube kmscube_animation kmstriangle
+
+kmscube_LDFLAGS = \
+	-no-undefined
+
+kmscube_LDADD = \
+	$(DRM_LIBS) \
+	$(GBM_LIBS) \
+	$(EGL_LIBS) \
+	$(GLES2_LIBS)
+
+kmscube_CFLAGS = \
+	-O0 -g -lm \
+	$(DRM_CFLAGS) \
+	$(GBM_CFLAGS) \
+	$(EGL_CFLAGS) \
+	$(GLES2_CFLAGS)
+
+kmscube_SOURCES = \
+	kmscube.c \
+	esTransform.c
+
+kmscube_animation_LDFLAGS = \
+	-no-undefined
+
+kmscube_animation_LDADD = \
+	$(DRM_LIBS) \
+	$(GBM_LIBS) \
+	$(EGL_LIBS) \
+	$(GLES2_LIBS)
+
+kmscube_animation_CFLAGS = \
+	-O0 -g -lm \
+	$(DRM_CFLAGS) \
+	$(GBM_CFLAGS) \
+	$(EGL_CFLAGS) \
+	$(GLES2_CFLAGS)
+
+kmscube_animation_SOURCES = \
+	kmscube_animation.c \
+	esTransform.c
+
+kmstriangle_LDFLAGS = \
+	-no-undefined
+
+kmstriangle_LDADD = \
+	$(DRM_LIBS) \
+	$(GBM_LIBS) \
+	$(EGL_LIBS) \
+	$(GLES2_LIBS)
+
+kmstriangle_CFLAGS = \
+	-O0 -g -lm \
+	$(DRM_CFLAGS) \
+	$(GBM_CFLAGS) \
+	$(EGL_CFLAGS) \
+	$(GLES2_CFLAGS)
+
+kmstriangle_SOURCES = \
+	kmstriangle.c \
+	esTransform.c
