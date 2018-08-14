@@ -31,11 +31,10 @@ link_directories(
 )
 
 set(PROGRAM gbm_es2_demo)
-add_executable(${PROGRAM} ${PROGRAM}.cpp)
-target_link_libraries(${PROGRAM} ${EXTRA_LIBS})
-MESSAGE(${PROGRAM} " links " ${EXTRA_LIBS})
-
-set(PROGRAM dma_buf_mmap_demo)
-add_executable(${PROGRAM} ${PROGRAM}.cpp)
+file(GLOB all_SRC
+    "*.h"
+    "*.cpp"
+)
+add_executable(${PROGRAM} ${all_SRC})
 target_link_libraries(${PROGRAM} ${EXTRA_LIBS})
 MESSAGE(${PROGRAM} " links " ${EXTRA_LIBS})

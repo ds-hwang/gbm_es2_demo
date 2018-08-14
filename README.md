@@ -31,7 +31,7 @@
 ```
 > gbm_es2_demo
 or
-> dma_buf_mmap_demo
+> gbm_es2_demo -M # mmap test
 ```
 
 ## Yocto
@@ -46,7 +46,7 @@ or
 * Show how to swap buffer and vsync
 * Show how to implement GLES2 app
 
-## dma_buf_mmap_demo
+## gbm_es2_demo -M
 * Same to gbm_es2_demo except for updating cube surface using dma_buf mmap
 * It's very nice demo to show how Chromium zero-copy texture upload works. Chromium doesn't use glTexImage2D to update texture thank to new dma_buf mmap API. For more Chromium detail, check [the chrome issue](crbug.com/475633)
 * After Linux kernel v4.6, you can use following code. (currently only Intel Architecture supports it)
@@ -61,7 +61,7 @@ or
 * The style complying with [Chromium’s style guide](http://www.chromium.org/developers/coding-style)
 * Before submitting a patch, always run `clang-format`
 ```
-> clang-format-3.7 -i *.h *.cpp
+> clang-format-5.0 -i `find . -name "*.cpp" -o -name "*.h"`
 ```
 
 # Reference
