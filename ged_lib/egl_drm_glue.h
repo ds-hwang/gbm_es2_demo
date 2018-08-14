@@ -42,9 +42,9 @@ class StreamTexture {
   virtual void Unmap() = 0;
   virtual GLuint GetTextureID() const = 0;
   struct Dimension {
-    size_t width = 0;
-    size_t height = 0;
-    size_t stride = 0;
+    int width = 0;
+    int height = 0;
+    int stride = 0;
   };
   virtual Dimension GetDimension() const = 0;
 };
@@ -63,8 +63,8 @@ class EGLDRMGlue {
   void operator=(const EGLDRMGlue&) = delete;
 
   struct Size {
-    size_t width;
-    size_t height;
+    int width;
+    int height;
   };
   Size GetDisplaySize() const;
 

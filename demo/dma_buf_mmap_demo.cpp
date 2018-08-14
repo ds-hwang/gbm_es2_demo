@@ -52,8 +52,9 @@ ES2CubeMapImpl::~ES2CubeMapImpl() {
   stream_texture_.reset();
 }
 
-bool ES2CubeMapImpl::Initialize(std::string card) {
-  std::unique_ptr<ged::DRMModesetter> drm = ged::DRMModesetter::Create(card);
+bool ES2CubeMapImpl::Initialize(std::string card, bool atomic) {
+  std::unique_ptr<ged::DRMModesetter> drm =
+      ged::DRMModesetter::Create(card, atomic);
   if (!drm) {
     fprintf(stderr, "failed to create DRMModesetter.\n");
     return false;
@@ -495,7 +496,7 @@ void ES2CubeMapImpl::UpdateStreamTexture(unsigned long usec) {
   if (last_progress_ > progress)
     even_turn_ = !even_turn_;
 
-  for (size_t y = 0; y < dimension.height; y++) {
+  for (int y = 0; y < dimension.height; y++) {
     size_t index =
         (y % (2 * pattern_width) < pattern_width) ^ even_turn_ ? 0 : 1;
     std::copy(&row_color[index][0], &row_color[index][0] + s_length,

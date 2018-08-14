@@ -393,9 +393,7 @@ class EGLDRMGlue::Impl : public DRMModesetter::Client {
     GLuint gl_fb;
   };
 
-  bool CreateFramebuffer(size_t width,
-                         size_t height,
-                         Framebuffer& framebuffer) {
+  bool CreateFramebuffer(int width, int height, Framebuffer& framebuffer) {
     framebuffer.bo = gbm_bo_create(gbm_, width, height, GBM_FORMAT_XRGB8888,
                                    GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
     if (!framebuffer.bo) {
@@ -428,9 +426,9 @@ class EGLDRMGlue::Impl : public DRMModesetter::Client {
                                       EGL_LINUX_DRM_FOURCC_EXT,
                                       GBM_FORMAT_XRGB8888,
                                       EGL_DMA_BUF_PLANE0_PITCH_EXT,
-                                      stride,
+                                      static_cast<const int>(stride),
                                       EGL_DMA_BUF_PLANE0_OFFSET_EXT,
-                                      offset,
+                                      static_cast<const int>(offset),
                                       EGL_NONE};
 
     framebuffer.image =

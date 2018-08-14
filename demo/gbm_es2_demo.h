@@ -37,7 +37,7 @@ class ES2Cube {
   ES2Cube(const ES2Cube&) = delete;
   void operator=(const ES2Cube&) = delete;
 
-  virtual bool Initialize(std::string card) = 0;
+  virtual bool Initialize(std::string card, bool atomic) = 0;
   virtual bool Run() = 0;
 };
 
@@ -45,7 +45,7 @@ class ES2CubeImpl : public ES2Cube {
  public:
   ES2CubeImpl() = default;
   ~ES2CubeImpl() override;
-  bool Initialize(std::string card) override;
+  bool Initialize(std::string card, bool atomic) override;
   bool Run() override;
 
  private:
@@ -68,7 +68,7 @@ class ES2CubeMapImpl : public ES2Cube {
   ES2CubeMapImpl() = default;
   ~ES2CubeMapImpl() override;
 
-  bool Initialize(std::string card) override;
+  bool Initialize(std::string card, bool atomic) override;
   bool Run() override;
 
  private:

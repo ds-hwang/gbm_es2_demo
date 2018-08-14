@@ -45,7 +45,6 @@ class DRMModesetter::Impl {
   void operator=(const Impl&) = delete;
 
   ~Impl() {
-    assert(!is_running_);
     assert(!page_flip_pending_);
     for (auto& dev : modeset_dev_list_) {
       /* restore saved CRTC configuration */
@@ -136,8 +135,9 @@ class DRMModesetter::Impl {
     drmEventContext evctx = {};
     evctx.version = DRM_EVENT_CONTEXT_VERSION;
     evctx.page_flip_handler = OnModesetPageFlipEvent;
+    bool is_running = true;
 
-    while (is_running_) {
+    while (is_running) {
       front_buffer_ ^= 1;
       if (!PageFlip(client_->GetFrameBuffer(front_buffer_), this)) {
         std::cout << "failed page flip.\n";
@@ -159,7 +159,7 @@ class DRMModesetter::Impl {
         }
 
         if (FD_ISSET(0, &fds)) {
-          Destroy();
+          is_running = false;
         }
         if (FD_ISSET(GetFD(), &fds)) {
           drmHandleEvent(GetFD(), &evctx);
@@ -171,8 +171,6 @@ class DRMModesetter::Impl {
     }
     return true;
   }
-
-  void Destroy() { is_running_ = false; }
 
  private:
   /*
@@ -414,11 +412,11 @@ class DRMModesetter::Impl {
   // return true when a page-flip is currently pending, that is, the kernel will
   // flip buffers on the next vertical blank.
   bool page_flip_pending_ = false;
-  bool is_running_ = true;
 };
 
 // static
-std::unique_ptr<DRMModesetter> DRMModesetter::Create(const std::string& card) {
+std::unique_ptr<DRMModesetter> DRMModesetter::Create(const std::string& card,
+                                                     bool atomic) {
   std::unique_ptr<DRMModesetter> drm(new DRMModesetter());
   if (drm->Initialize(card))
     return drm;

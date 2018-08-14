@@ -46,7 +46,8 @@ class DRMModesetter {
     virtual uint32_t GetFrameBuffer(int front_buffer) const = 0;
   };
 
-  static std::unique_ptr<DRMModesetter> Create(const std::string& card);
+  static std::unique_ptr<DRMModesetter> Create(const std::string& card,
+                                               bool atomic);
 
   ~DRMModesetter();
   DRMModesetter(const DRMModesetter&) = delete;
@@ -56,8 +57,8 @@ class DRMModesetter {
   int GetFD() const;
 
   struct Size {
-    size_t width;
-    size_t height;
+    int width;
+    int height;
   };
   Size GetDisplaySize() const;
 

@@ -76,7 +76,7 @@ int main(int argc, char* argv[]) {
   } else {
     demo.reset(new demo::ES2CubeImpl());
   }
-  if (!demo->Initialize(card)) {
+  if (!demo->Initialize(card, atomic)) {
     fprintf(stderr, "failed to initialize ES2Cube.\n");
     return -1;
   }

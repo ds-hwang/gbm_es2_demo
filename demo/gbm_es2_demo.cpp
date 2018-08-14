@@ -39,8 +39,9 @@ ES2CubeImpl::~ES2CubeImpl() {
   glDeleteProgram(program_);
 }
 
-bool ES2CubeImpl::Initialize(std::string card) {
-  std::unique_ptr<ged::DRMModesetter> drm = ged::DRMModesetter::Create(card);
+bool ES2CubeImpl::Initialize(std::string card, bool atomic) {
+  std::unique_ptr<ged::DRMModesetter> drm =
+      ged::DRMModesetter::Create(card, atomic);
   if (!drm) {
     fprintf(stderr, "failed to create DRMModesetter.\n");
     return false;
