@@ -23,6 +23,13 @@
 
 set (EXTRA_LIBS ${EXTRA_LIBS} ged)
 
+include_directories(
+    ${CUSTOM_INCLUDE_DIRS}
+)
+link_directories(
+    ${CUSTOM_LINK_DIRS}
+)
+
 set(PROGRAM gbm_es2_demo)
 add_executable(${PROGRAM} ${PROGRAM}.cpp)
 target_link_libraries(${PROGRAM} ${EXTRA_LIBS})
