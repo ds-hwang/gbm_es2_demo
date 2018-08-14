@@ -45,6 +45,8 @@ class DRMModesetter::Impl {
   void operator=(const Impl&) = delete;
 
   ~Impl() {
+    assert(!is_running_);
+    assert(!page_flip_pending_);
     for (auto& dev : modeset_dev_list_) {
       /* restore saved CRTC configuration */
       drmModeSetCrtc(fd_, dev->saved_crtc->crtc_id, dev->saved_crtc->buffer_id,
@@ -56,14 +58,17 @@ class DRMModesetter::Impl {
     close(fd_);
   }
 
+  void SetClient(DRMModesetter::Client* client) { client_ = client; }
   int GetFD() const { return fd_; }
 
   Size GetDisplaySize() const {
     return {modeset_dev_->mode.hdisplay, modeset_dev_->mode.vdisplay};
   }
 
-  bool ModeSetCrtc(uint32_t fb_id) {
+  bool ModeSetCrtc() {
     assert(modeset_dev_);
+    uint32_t fb_id = client_->GetFrameBuffer(front_buffer_);
+
     /* perform actual modesetting on each found connector+CRTC */
     modeset_dev_->saved_crtc = drmModeGetCrtc(fd_, modeset_dev_->crtc);
     int ret = drmModeSetCrtc(fd_, modeset_dev_->crtc, fb_id, 0, 0,
@@ -125,6 +130,49 @@ class DRMModesetter::Impl {
 
     return true;
   }
+
+  bool Run() {
+    fd_set fds;
+    drmEventContext evctx = {};
+    evctx.version = DRM_EVENT_CONTEXT_VERSION;
+    evctx.page_flip_handler = OnModesetPageFlipEvent;
+
+    while (is_running_) {
+      front_buffer_ ^= 1;
+      if (!PageFlip(client_->GetFrameBuffer(front_buffer_), this)) {
+        std::cout << "failed page flip.\n";
+        return false;
+      }
+
+      page_flip_pending_ = true;
+      while (page_flip_pending_) {
+        FD_ZERO(&fds);
+        FD_SET(0, &fds);
+        FD_SET(GetFD(), &fds);
+        int ret = select(GetFD() + 1, &fds, nullptr, nullptr, nullptr);
+        if (ret < 0) {
+          std::cout << "select err: " << std::strerror(errno) << '\n';
+          return false;
+        } else if (ret == 0) {
+          fprintf(stderr, "select timeout!\n");
+          return false;
+        }
+
+        if (FD_ISSET(0, &fds)) {
+          Destroy();
+        }
+        if (FD_ISSET(GetFD(), &fds)) {
+          drmHandleEvent(GetFD(), &evctx);
+        }
+      }
+      if (FD_ISSET(0, &fds)) {
+        printf("exit due to user-input\n");
+      }
+    }
+    return true;
+  }
+
+  void Destroy() { is_running_ = false; }
 
  private:
   /*
@@ -329,6 +377,21 @@ class DRMModesetter::Impl {
     return false;
   }
 
+  // As soon as page flip, notify the client to draw the next frame.
+  void DidPageFlip(unsigned int sec, unsigned int usec) {
+    page_flip_pending_ = false;
+    client_->DidPageFlip(front_buffer_, sec, usec);
+  }
+
+  static void OnModesetPageFlipEvent(int fd,
+                                     unsigned int frame,
+                                     unsigned int sec,
+                                     unsigned int usec,
+                                     void* data) {
+    DRMModesetter::Impl* self = static_cast<DRMModesetter::Impl*>(data);
+    self->DidPageFlip(sec, usec);
+  }
+
   struct ModesetDev {
     // the display mode that we want to use
     drmModeModeInfo mode;
@@ -342,9 +405,16 @@ class DRMModesetter::Impl {
   };
 
   int fd_ = -1;
+  unsigned int front_buffer_ = 0;
+  DRMModesetter::Client* client_ = nullptr;
   std::list<std::unique_ptr<ModesetDev>> modeset_dev_list_;
   // Use the first modeset device.
   ModesetDev* modeset_dev_ = nullptr;
+
+  // return true when a page-flip is currently pending, that is, the kernel will
+  // flip buffers on the next vertical blank.
+  bool page_flip_pending_ = false;
+  bool is_running_ = true;
 };
 
 // static
@@ -364,6 +434,10 @@ bool DRMModesetter::Initialize(const std::string& card) {
   return impl_->Initialize(card);
 }
 
+void DRMModesetter::SetClient(DRMModesetter::Client* client) {
+  impl_->SetClient(client);
+}
+
 int DRMModesetter::GetFD() const {
   return impl_->GetFD();
 }
@@ -372,12 +446,16 @@ DRMModesetter::Size DRMModesetter::GetDisplaySize() const {
   return impl_->GetDisplaySize();
 }
 
-bool DRMModesetter::ModeSetCrtc(uint32_t fb_id) {
-  return impl_->ModeSetCrtc(fb_id);
+bool DRMModesetter::ModeSetCrtc() {
+  return impl_->ModeSetCrtc();
 }
 
 bool DRMModesetter::PageFlip(uint32_t fb_id, void* user_data) {
   return impl_->PageFlip(fb_id, user_data);
+}
+
+bool DRMModesetter::Run() {
+  return impl_->Run();
 }
 
 }  // namespace ged

@@ -38,8 +38,8 @@
 #include <GLES2/gl2.h>
 
 #include <cassert>
-#include <cstring>
 #include <cmath>
+#include <cstring>
 #include <memory>
 
 #include "drm_modesetter.h"
@@ -188,17 +188,59 @@ class ES2Cube {
 
     static const GLfloat vTexCoord[] = {
         // front
-        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        1.0f,
+        1.0f,
         // back
-        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        1.0f,
+        1.0f,
         // right
-        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        1.0f,
+        1.0f,
         // left
-        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        1.0f,
+        1.0f,
         // top
-        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        1.0f,
+        1.0f,
         // bottom
-        0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        1.0f,
+        1.0f,
     };
 
     if (!InitializeGLProgram())
@@ -222,8 +264,9 @@ class ES2Cube {
         sizeof(vVertices) + sizeof(vColors) + sizeof(vNormals);
     glGenBuffers(1, &vbo_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vVertices) + sizeof(vColors) +
-                                      sizeof(vNormals) + sizeof(vTexCoord),
+    glBufferData(GL_ARRAY_BUFFER,
+                 sizeof(vVertices) + sizeof(vColors) + sizeof(vNormals) +
+                     sizeof(vTexCoord),
                  0, GL_STATIC_DRAW);
     glBufferSubData(GL_ARRAY_BUFFER, positionsoffset, sizeof(vVertices),
                     &vVertices[0]);

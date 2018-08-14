@@ -24,15 +24,16 @@
 #ifndef GED_EGL_DRM_GLUE_H_
 #define GED_EGL_DRM_GLUE_H_
 
-#include <memory>
 #include <functional>
+#include <memory>
 
 namespace ged {
 
 class DRMModesetter;
 typedef unsigned int GLuint;
 typedef std::function<void(GLuint /* gl_framebuffer */,
-                           unsigned long /* usec */)> SwapBuffersCallback;
+                           unsigned long /* usec */)>
+    SwapBuffersCallback;
 
 class StreamTexture {
  public:
@@ -71,9 +72,6 @@ class EGLDRMGlue {
                                                      size_t height);
 
   bool Run();
-
-  // It must be called inside Run() loop.
-  void Destroy();
 
  private:
   EGLDRMGlue();

@@ -36,12 +36,23 @@ namespace ged {
  */
 class DRMModesetter {
  public:
+  class Client {
+   public:
+    virtual ~Client() = default;
+
+    virtual void DidPageFlip(int front_buffer,
+                             unsigned int sec,
+                             unsigned int usec) = 0;
+    virtual uint32_t GetFrameBuffer(int front_buffer) const = 0;
+  };
+
   static std::unique_ptr<DRMModesetter> Create(const std::string& card);
 
   ~DRMModesetter();
   DRMModesetter(const DRMModesetter&) = delete;
   void operator=(const DRMModesetter&) = delete;
 
+  void SetClient(Client* client);
   int GetFD() const;
 
   struct Size {
@@ -50,8 +61,9 @@ class DRMModesetter {
   };
   Size GetDisplaySize() const;
 
-  bool ModeSetCrtc(uint32_t fb_id);
+  bool ModeSetCrtc();
   bool PageFlip(uint32_t fb_id, void* user_data);
+  bool Run();
 
  private:
   DRMModesetter();

@@ -23,11 +23,11 @@
 
 #include "egl_drm_glue.h"
 
-#include <gbm.h>
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <gbm.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <xf86drm.h>
@@ -201,17 +201,16 @@ class StreamTextureImpl : public StreamTexture {
 
 }  // namespace
 
-class EGLDRMGlue::Impl {
+class EGLDRMGlue::Impl : public DRMModesetter::Client {
  public:
   Impl(std::unique_ptr<DRMModesetter> drm, const SwapBuffersCallback& callback)
-      : drm_(std::move(drm)), callback_(callback), egl_({}) {}
+      : drm_(std::move(drm)), callback_(callback), egl_({}) {
+    drm_->SetClient(this);
+  }
   Impl(const Impl&) = delete;
   void operator=(const Impl&) = delete;
 
-  ~Impl() {
-    assert(!is_running_);
-    assert(!page_flip_pending_);
-
+  ~Impl() override {
     /* destroy framebuffers */
     for (auto& framebuffer : framebuffers_) {
       glDeleteFramebuffers(1, &framebuffer.gl_fb);
@@ -248,14 +247,15 @@ class EGLDRMGlue::Impl {
         return false;
       }
     }
-    front_buffer_ = 0;
 
     // Need to do the first mode setting before page flip.
-    if (!drm_->ModeSetCrtc(framebuffers_[front_buffer_].fb_id))
+    if (!drm_->ModeSetCrtc())
       return false;
 
     return true;
   }
+
+  bool Run() { return drm_->Run(); }
 
   Size GetDisplaySize() const {
     DRMModesetter::Size display_size = drm_->GetDisplaySize();
@@ -266,50 +266,6 @@ class EGLDRMGlue::Impl {
                                                      size_t height) {
     return StreamTextureImpl::Create(gbm_, egl_, width, height);
   }
-
-  bool Run() {
-    fd_set fds;
-    drmEventContext evctx = {};
-    evctx.version = DRM_EVENT_CONTEXT_VERSION;
-    evctx.page_flip_handler = OnModesetPageFlipEvent;
-
-    while (is_running_) {
-      const Framebuffer& back_fb = framebuffers_[front_buffer_ ^ 1];
-      if (!drm_->PageFlip(back_fb.fb_id, this)) {
-        std::cout << "failed page flip.\n";
-        return false;
-      }
-      front_buffer_ ^= 1;
-
-      page_flip_pending_ = true;
-      while (page_flip_pending_) {
-        FD_ZERO(&fds);
-        FD_SET(0, &fds);
-        FD_SET(drm_->GetFD(), &fds);
-        int ret = select(drm_->GetFD() + 1, &fds, nullptr, nullptr, nullptr);
-        if (ret < 0) {
-          std::cout << "select err: " << std::strerror(errno) << '\n';
-          return false;
-        } else if (ret == 0) {
-          fprintf(stderr, "select timeout!\n");
-          return false;
-        }
-
-        if (FD_ISSET(0, &fds)) {
-          Destroy();
-        }
-        if (FD_ISSET(drm_->GetFD(), &fds)) {
-          drmHandleEvent(drm_->GetFD(), &evctx);
-        }
-      }
-      if (FD_ISSET(0, &fds)) {
-        printf("exit due to user-input\n");
-      }
-    }
-    return true;
-  }
-
-  void Destroy() { is_running_ = false; }
 
  private:
   bool InitializeEGL() {
@@ -509,22 +465,18 @@ class EGLDRMGlue::Impl {
   }
 
   // As soon as page flip, notify the client to draw the next frame.
-  void DidPageFlip(unsigned int sec, unsigned int usec) {
-    page_flip_pending_ = false;
-    const Framebuffer& back_fb = framebuffers_[front_buffer_ ^ 1];
+  void DidPageFlip(int front_buffer,
+                   unsigned int sec,
+                   unsigned int usec) override {
+    const Framebuffer& back_fb = framebuffers_[front_buffer ^ 1];
 
     glBindFramebuffer(GL_FRAMEBUFFER, back_fb.gl_fb);
     callback_(back_fb.gl_fb, sec * 1000000 + usec);
     EGLSyncFence();
   }
 
-  static void OnModesetPageFlipEvent(int fd,
-                                     unsigned int frame,
-                                     unsigned int sec,
-                                     unsigned int usec,
-                                     void* data) {
-    EGLDRMGlue::Impl* self = static_cast<EGLDRMGlue::Impl*>(data);
-    self->DidPageFlip(sec, usec);
+  uint32_t GetFrameBuffer(int front_buffer) const override {
+    return framebuffers_[front_buffer].fb_id;
   }
 
   std::unique_ptr<ged::DRMModesetter> drm_;
@@ -533,13 +485,7 @@ class EGLDRMGlue::Impl {
   struct gbm_device* gbm_ = nullptr;
 
   EGLGlue egl_;
-  unsigned int front_buffer_ = 0;
   Framebuffer framebuffers_[NUM_BUFFERS];
-
-  // return true when a page-flip is currently pending, that is, the kernel will
-  // flip buffers on the next vertical blank.
-  bool page_flip_pending_ = false;
-  bool is_running_ = true;
 };
 
 // static
@@ -573,10 +519,6 @@ std::unique_ptr<StreamTexture> EGLDRMGlue::CreateStreamTexture(size_t width,
 
 bool EGLDRMGlue::Run() {
   return impl_->Run();
-}
-
-void EGLDRMGlue::Destroy() {
-  impl_->Destroy();
 }
 
 }  // namespace ged
