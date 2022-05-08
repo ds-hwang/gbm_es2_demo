@@ -659,15 +659,16 @@ int main(int argc, char *argv[]) {
   FD_SET(0, &fds);
   FD_SET(drm.fd, &fds);
 
-  ret = init_egl();
-  if (ret) {
-    printf("failed to initialize EGL\n");
-    return ret;
-  }
 
   ret = init_gbm();
   if (ret) {
     printf("failed to initialize GBM\n");
+    return ret;
+  }
+
+  ret = init_egl();
+  if (ret) {
+    printf("failed to initialize EGL\n");
     return ret;
   }
 
