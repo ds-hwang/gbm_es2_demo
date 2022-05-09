@@ -338,7 +338,7 @@ class EGLDRMGlue::Impl {
       egl_.egl_sync_supported = false;
     }
 
-    egl_.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    egl_.display = eglGetDisplay(gbm_);
 
     EGLint major, minor = 0;
     if (!eglInitialize(egl_.display, &major, &minor)) {
