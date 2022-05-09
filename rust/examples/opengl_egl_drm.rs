@@ -439,10 +439,11 @@ pub fn main() {
 
         let delay = time::Duration::from_millis(100);
         thread::sleep(delay);
-        count += 1;
+       /* count += 1;
         if count == 10 {
             break;
         }
+*/
     }
 
     egl_platform.destroy(&gbm);
